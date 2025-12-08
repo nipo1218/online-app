@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="stylesheet" href="chat.css">
+    <title>じっけんしつ</title>
+</head>
+<body>
+    
+    <div id="login-screen">
+        <div class="login-card">
+            <h2>じっけんしつ</h2>
+            <p class="subtitle">アバターをえらんでね</p>
+            
+            <div class="char-select">
+                <div class="char-opt selected" data-id="1"><img src="1.png" alt="1"></div>
+                <div class="char-opt" data-id="2"><img src="2.png" alt="2"></div>
+                <div class="char-opt" data-id="3"><img src="3.png" alt="3"></div>
+                <div class="char-opt" data-id="4"><img src="4.png" alt="4"></div>
+            </div>
+            <input type="text" id="username" placeholder="おなまえ" maxlength="8" title="">
+            <button id="start-btn">はじめる</button>
+        </div>
+    </div>
+
+    <div id="name-confirm-modal" class="modal-overlay">
+        <div class="modal-box">
+            <h3>確認</h3>
+            <p>おなまえは後から変更できません。<br>このおなまえでよろしいですか？</p>
+            <p class="note" id="confirm-name-display"></p>
+            <div class="modal-btn-row">
+                <button class="modal-btn btn-primary" onclick="confirmNameAndJoin()">はい</button>
+                <button class="modal-btn btn-secondary" onclick="closeNameConfirm()">いいえ</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="confirm-modal" class="modal-overlay">
+        <div class="modal-box">
+            <h3>確認</h3>
+            <p>お部屋から出ますか？</p>
+            <p class="note">※10分間再入室できません</p>
+            <div class="modal-btn-row">
+                <button class="modal-btn btn-danger" onclick="performExit()">はい</button>
+                <button class="modal-btn btn-secondary" onclick="closeExitModal()">いいえ</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="error-modal" class="modal-overlay">
+        <div class="modal-box">
+            <h3>おしらせ</h3>
+            <p id="error-message"></p>
+            <div class="modal-btn-row">
+                <button class="modal-btn btn-primary" onclick="closeErrorModal()">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="debug-info"></div>
+
+    <div id="log-overlay">
+        <div class="log-header">
+            <h3>チャットログ</h3>
+            <span class="log-close" onclick="toggleLog()">✕</span>
+        </div>
+        <div class="log-list" id="log-list"></div>
+    </div>
+
+    <div id="quick-chat-popup">
+        <div class="quick-btn" onclick="sendQuickChat('ナイス👏')">ナイス👏</div>
+        <div class="quick-btn" onclick="sendQuickChat('おめでとう🎉')">おめでとう🎉</div>
+        <div class="quick-btn" onclick="sendQuickChat('こんにちは！')">こんにちは！</div>
+        <div class="quick-btn" onclick="sendQuickChat('またね👋')">またね👋</div>
+    </div>
+
+    <button id="obs-exit-btn" onclick="toggleObsMode()">OBSモードを解除</button>
+
+    <div id="bottom-ui">
+        <div class="bottom-top-row">
+            <div id="room-badge">
+                <span class="room-icon"></span>
+                <span id="room-name">楽屋（配信外）</span>
+            </div>
+            <button id="exit-btn" onclick="openExitModal()">退室する</button>
+        </div>
+        <div class="bottom-chat-row">
+            <div class="chat-ui-btn" onclick="toggleLog()">📋</div>
+            <input type="text" id="chat-input" placeholder="チャット..." maxlength="50">
+            <div class="chat-ui-btn" onclick="toggleQuickChat()" style="background:#fff0f5; color:var(--deep-rose);">💬</div>
+            <button id="send-btn" class="chat-ui-btn">▶</button>
+        </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+    <script src="chat.js"></script>
+</body>
+</html>
