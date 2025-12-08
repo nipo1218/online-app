@@ -1,5 +1,5 @@
 // ==========================================
-// Deno Deploy Server - 究極の待機電力ゼロ版
+// Deno Deploy Server - 名前重複許可版
 // ==========================================
 
 import { serveDir } from "https://deno.land/std@0.224.0/http/file_server.ts";
@@ -29,9 +29,8 @@ const corsHeaders = {
 };
 
 // ==========================================
-// 定期クリーンアップ (変更点1: 1分→5分に変更)
+// 定期クリーンアップ (5分ごと)
 // ==========================================
-// 頻繁に起き上がらせないことでCPU時間を節約します
 setInterval(async () => {
   try {
     const now = Date.now();
@@ -42,7 +41,6 @@ setInterval(async () => {
       const user = entry.value;
       if (now - user.lastActive > TIMEOUT_MS) {
         await kv.delete(["users", user.uuid]);
-        await kv.delete(["names", user.name]);
         
         channel.postMessage({ 
           type: "userTimeout", 
@@ -55,7 +53,7 @@ setInterval(async () => {
   } catch (e) {
     console.error("Cleanup error:", e);
   }
-}, 5 * 60 * 1000); // ★ここを5分に変更！
+}, 5 * 60 * 1000);
 
 
 // ==========================================
@@ -73,7 +71,7 @@ Deno.serve(async (req) => {
       return await handleApi(req, url);
   }
 
-  // 2. 静的ファイル (変更なし)
+  // 2. 静的ファイル
   return serveDir(req, {
     fsRoot: ".",
     urlRoot: "",
@@ -91,24 +89,21 @@ async function handleApi(req: Request, url: URL) {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // --- SSE (変更点2: Keep-Alive追加) ---
+  // --- SSE (Keep-Alive付き) ---
   if (url.pathname === "/events") {
     const uuid = url.searchParams.get("uuid");
     if (!uuid) return new Response("Missing uuid", { status: 400 });
 
     const channel = new BroadcastChannel(BC_CHANNEL);
     const encoder = new TextEncoder();
-    let keepAliveId: number; // タイマーID
+    let keepAliveId: number;
 
     const body = new ReadableStream({
       start(controller) {
-        // 接続維持コメント
         controller.enqueue(encoder.encode(`: connected\n\n`));
 
-        // ★重要: 30秒ごとに空データを送って、回線切断を防ぐ
         keepAliveId = setInterval(() => {
             try {
-                // コロン(:)で始まる行はコメント扱いされ、クライアントには影響しません
                 controller.enqueue(encoder.encode(`: keepalive\n\n`));
             } catch (e) {
                 clearInterval(keepAliveId);
@@ -124,7 +119,7 @@ async function handleApi(req: Request, url: URL) {
       },
       cancel() {
         channel.close();
-        clearInterval(keepAliveId); // 切断時にタイマーを止める
+        clearInterval(keepAliveId);
       }
     });
 
@@ -137,12 +132,10 @@ async function handleApi(req: Request, url: URL) {
     });
   }
 
-  // --- 以降は変更なし (コピー用) ---
-  
   if (req.method === "POST" && url.pathname === "/roomAction") {
     try {
       const body = await req.json();
-      const { uuid, name, charId, action, targetRoom, message } = body;
+      const { uuid, name, charId, action, targetRoom, message, isRefresh } = body;
       const now = Date.now();
 
       if (action === "chat") {
@@ -181,8 +174,14 @@ async function handleApi(req: Request, url: URL) {
         const existing = await kv.get<UserState>(["users", uuid]);
         if (existing.value) {
           await kv.delete(["users", uuid]);
-          await kv.delete(["names", existing.value.name]);
-          await kv.set(["penalty", uuid], now + PENALTY_MS);
+          
+          // リフレッシュ(F5)の場合もペナルティを与える
+          if (isRefresh) {
+            await kv.set(["penalty", uuid], now + PENALTY_MS);
+          } else {
+            await kv.set(["penalty", uuid], now + PENALTY_MS);
+          }
+          
           const channel = new BroadcastChannel(BC_CHANNEL);
           channel.postMessage({ type: "userLeft", uuid, name: existing.value.name });
           channel.close();
@@ -191,26 +190,30 @@ async function handleApi(req: Request, url: URL) {
       }
 
       if (action === "join") {
+        // ペナルティチェック
+        const penalty = await kv.get<number>(["penalty", uuid]);
+        if (penalty.value && penalty.value > now) {
+          const remainMin = Math.ceil((penalty.value - now) / 60000);
+          return new Response(JSON.stringify({ 
+            error: `あと${remainMin}分待ってから入室してください` 
+          }), { status: 403, headers: corsHeaders });
+        }
+
+        // 既存セッションの復帰（同じUUID）
         const existing = await kv.get<UserState>(["users", uuid]);
         if (existing.value) {
           existing.value.lastActive = now;
-          if (name && name !== existing.value.name) {
-             await kv.delete(["names", existing.value.name]);
-             existing.value.name = name;
-             await kv.set(["names", name], uuid);
-          }
           if (charId) existing.value.charId = charId;
           await kv.set(["users", uuid], existing.value);
           return new Response(JSON.stringify({ status: "restored", user: existing.value }), { headers: corsHeaders });
         }
-        const nameOwner = await kv.get(["names", name]);
-        if (nameOwner.value && nameOwner.value !== uuid) {
-          return new Response(JSON.stringify({ error: "その名前は使用中です" }), { status: 409, headers: corsHeaders });
-        }
+
+        // ★名前の重複チェックを削除 - 同じ名前でも入室可能に
         const userState: UserState = {
           uuid, name, charId: charId || "1", room: targetRoom || "A", lastActive: now, joinedAt: now
         };
-        await kv.atomic().set(["users", uuid], userState).set(["names", name], uuid).commit();
+        await kv.set(["users", uuid], userState);
+        
         const channel = new BroadcastChannel(BC_CHANNEL);
         channel.postMessage({ type: "userJoined", user: userState });
         channel.close();

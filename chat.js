@@ -1,12 +1,10 @@
-// chat.js - Deno Deploy 最適化版
+// chat.js - スプライトアニメーション対応版
 
-// ★URLを空文字にする（同じサーバーに通信するため、リクエストが半減します）
 const SERVER_URL = "";
 
 // --- 設定 ---
 const RTC_CONFIG = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
 const SPEED = 2.0;
-// ★ハートビートを8分に変更（サーバーは10分まで待ってくれるのでこれで十分）
 const HEARTBEAT_INTERVAL = 8 * 60 * 1000;
 
 // ジャンプ設定
@@ -18,13 +16,25 @@ const MIN_Y = 80;
 const MAX_Y = 188;
 
 // 初期位置
-const SPAWN_X = 357;
-const SPAWN_Y = 178;
+const SPAWN_X = 200;
+const SPAWN_Y = 150;
 
 // 部屋移動ポイント
 const PORTAL_X = 30;
 const PORTAL_Y = 80;
 const PORTAL_TOLERANCE = 15;
+
+// スプライト設定
+const SPRITE_COLS = 4;
+const SPRITE_ROWS = 3;
+const ANIM_SPEED = 150; // ms per frame
+
+// 椅子の位置（部屋Aに2つ配置）
+const CHAIRS = [
+    { x: 100, y: 160, dir: 'left' },
+    { x: 280, y: 160, dir: 'right' }
+];
+const CHAIR_SIT_DIST = 20;
 
 // --- 状態管理 ---
 let eventSource = null;
@@ -34,7 +44,11 @@ let obsMode = false;
 let debugMode = false;
 let myData = { 
     x: SPAWN_X, y: SPAWN_Y, z: 0, vz: 0,
-    name: "", charId: "1", msg: ""
+    name: "", charId: "1", msg: "",
+    direction: 'down', // up, down, left, right
+    isMoving: false,
+    isSitting: false,
+    sittingChair: null
 };
 let keys = {};
 let players = {};
@@ -56,6 +70,10 @@ let hasActivity = false;
 // エフェクト
 let particles = [];
 
+// アニメーション
+let animFrame = 0;
+let lastAnimTime = 0;
+
 // UUID永続化
 let myUuid = localStorage.getItem("game_uuid");
 if (!myUuid) {
@@ -75,13 +93,24 @@ const roomName = document.getElementById('room-name');
 const obsExitBtn = document.getElementById('obs-exit-btn');
 const debugInfo = document.getElementById('debug-info');
 
-// --- 画像読み込み ---
-const images = {};
+// --- スプライトシート読み込み ---
+const spriteSheets = {};
+const staticImages = {};
 ['1','2','3','4'].forEach(id => {
+    // スプライトシート
+    const sp = new Image();
+    sp.src = `${id}-sp.png`;
+    spriteSheets[id] = sp;
+    
+    // 静的画像（フォールバック用）
     const img = new Image();
     img.src = `${id}.png`;
-    images[id] = img;
+    staticImages[id] = img;
 });
+
+// 椅子スプライト
+const chairSprite = new Image();
+chairSprite.src = 'chair-sp.png';
 
 // ==========================================
 // 0. 初期化
@@ -196,7 +225,7 @@ async function startGame() {
 
     } catch (e) {
         console.error("Join failed:", e);
-        showError("接続に失敗しました。しばらく待ってからお試しください。");
+        showError("接続に失敗しました");
     }
 }
 
@@ -236,17 +265,14 @@ function connectSSE() {
     eventSource.onmessage = async (e) => {
         const msg = JSON.parse(e.data);
 
-        // ★チャット受信 (サーバー経由)
         if (msg.type === "chat") {
             const senderName = msg.name || "???";
             addLog(senderName, msg.msg);
             
-            // 吹き出し表示
             if (players[msg.uuid]) {
                 players[msg.uuid].msg = msg.msg;
                 setTimeout(() => { if(players[msg.uuid]) players[msg.uuid].msg = ""; }, 5000);
             } else if (msg.uuid === myUuid) {
-                // 自分
                 myData.msg = msg.msg;
                 setTimeout(() => myData.msg = "", 5000);
             }
@@ -303,7 +329,6 @@ function connectSSE() {
 // ==========================================
 function startHeartbeat() {
     heartbeatTimer = setInterval(async () => {
-        // アクティビティがあった場合のみ送信
         if (hasActivity) {
             await sendHeartbeat();
             hasActivity = false;
@@ -380,7 +405,7 @@ async function sendSignal(targetUuid, signalData) {
 }
 
 // ==========================================
-// 6. WebRTC (移動同期のみ)
+// 6. WebRTC (移動同期)
 // ==========================================
 async function createPeerConnection(targetUuid, isInitiator) {
     if (peers[targetUuid]) return;
@@ -389,7 +414,6 @@ async function createPeerConnection(targetUuid, isInitiator) {
     peers[targetUuid] = pc;
     pendingCandidates[targetUuid] = [];
 
-    // WebRTC Candidate バッチ送信 (リクエスト削減)
     let iceSendTimer = null;
     let iceBatch = [];
     
@@ -444,10 +468,8 @@ async function handleSignalMessage(fromUuid, signalData) {
         } else if (signalData.type === "answer") {
             await pc.setRemoteDescription(new RTCSessionDescription(signalData.sdp));
         } else if (signalData.type === "candidate") {
-            // 古い単発処理も念のため残す
             await pc.addIceCandidate(new RTCIceCandidate(signalData.candidate));
         } else if (signalData.type === "candidates") {
-            // ★バッチ受信対応
             for (const candidate of signalData.candidates) {
                 await pc.addIceCandidate(new RTCIceCandidate(candidate));
             }
@@ -472,7 +494,6 @@ function setupDataChannel(channel, uuid) {
         } else if (msg.type === "effect") {
             spawnParticles(msg.effectType);
         }
-        // ★チャットはServer経由になったのでP2P処理は削除
     };
 
     channel.onclose = () => {
@@ -501,7 +522,7 @@ function broadcastToAll(type, payload) {
 }
 
 // ==========================================
-// 7. パーティクルエフェクト (変更なし)
+// 7. パーティクルエフェクト
 // ==========================================
 function spawnParticles(effectType) {
     const colors = effectType === 'nice' 
@@ -576,16 +597,52 @@ function drawStar(cx, cy, spikes, outerRadius, innerRadius) {
 }
 
 // ==========================================
-// 8. ゲームループ (変更なし)
+// 8. ゲームループ
 // ==========================================
 let lastBroadcast = 0;
+let prevX = SPAWN_X;
+let prevY = SPAWN_Y;
 
 function update() {
+    // 座っている場合は移動不可
+    if (myData.isSitting) {
+        myData.isMoving = false;
+        
+        // スペースキーで立ち上がる
+        if (keys[' '] || keys['Space']) {
+            myData.isSitting = false;
+            myData.sittingChair = null;
+        }
+        
+        updateParticles();
+        const now = Date.now();
+        if (now - lastBroadcast > 100) {
+            broadcastToAll("update", { data: myData });
+            lastBroadcast = now;
+        }
+        return;
+    }
+    
+    prevX = myData.x;
+    prevY = myData.y;
+    
     if (document.activeElement.id !== 'chat-input') {
-        if (keys['ArrowUp'] || keys['w'] || keys['W']) myData.y -= SPEED;
-        if (keys['ArrowDown'] || keys['s'] || keys['S']) myData.y += SPEED;
-        if (keys['ArrowLeft'] || keys['a'] || keys['A']) myData.x -= SPEED;
-        if (keys['ArrowRight'] || keys['d'] || keys['D']) myData.x += SPEED;
+        if (keys['ArrowUp'] || keys['w'] || keys['W']) {
+            myData.y -= SPEED;
+            myData.direction = 'up';
+        }
+        if (keys['ArrowDown'] || keys['s'] || keys['S']) {
+            myData.y += SPEED;
+            myData.direction = 'down';
+        }
+        if (keys['ArrowLeft'] || keys['a'] || keys['A']) {
+            myData.x -= SPEED;
+            myData.direction = 'left';
+        }
+        if (keys['ArrowRight'] || keys['d'] || keys['D']) {
+            myData.x += SPEED;
+            myData.direction = 'right';
+        }
         
         if ((keys[' '] || keys['Space']) && myData.z === 0) {
             myData.vz = JUMP_FORCE;
@@ -600,6 +657,13 @@ function update() {
         if (dist > SPEED) {
             myData.x += (dx / dist) * SPEED;
             myData.y += (dy / dist) * SPEED;
+            
+            // 方向を決定
+            if (Math.abs(dx) > Math.abs(dy)) {
+                myData.direction = dx > 0 ? 'right' : 'left';
+            } else {
+                myData.direction = dy > 0 ? 'down' : 'up';
+            }
         } else {
             myData.x = targetX;
             myData.y = targetY;
@@ -607,6 +671,9 @@ function update() {
             targetY = null;
         }
     }
+
+    // 移動判定
+    myData.isMoving = (myData.x !== prevX || myData.y !== prevY);
 
     if (myData.z < 0 || myData.vz !== 0) {
         myData.vz += GRAVITY;
@@ -619,9 +686,28 @@ function update() {
     }
 
     myData.y = Math.max(MIN_Y, Math.min(MAX_Y, myData.y));
-    const w = window.innerWidth;
+    const w = canvas.width || window.innerWidth;
     myData.x = Math.max(30, Math.min(w - 30, myData.x));
 
+    // 椅子に座る判定（部屋Aのみ）
+    if (currentRoom === 'A') {
+        for (const chair of CHAIRS) {
+            const dist = Math.sqrt(Math.pow(myData.x - chair.x, 2) + Math.pow(myData.y - chair.y, 2));
+            if (dist < CHAIR_SIT_DIST && !myData.isMoving) {
+                // クリックで座る
+                if (keys['Enter'] || keys['e'] || keys['E']) {
+                    myData.isSitting = true;
+                    myData.sittingChair = chair;
+                    myData.x = chair.x;
+                    myData.y = chair.y;
+                    myData.direction = chair.dir === 'left' ? 'left' : 'right';
+                    break;
+                }
+            }
+        }
+    }
+
+    // 部屋移動
     if (currentRoom === 'A') {
         if (myData.x <= PORTAL_X + PORTAL_TOLERANCE && 
             Math.abs(myData.y - PORTAL_Y) <= PORTAL_TOLERANCE) {
@@ -642,7 +728,7 @@ function update() {
 
     if (debugMode) {
         const connectedCount = Object.keys(dataChannels).length + 1;
-        debugInfo.innerHTML = `X: ${Math.round(myData.x)}, Y: ${Math.round(myData.y)}<br>接続数: ${connectedCount}`;
+        debugInfo.innerHTML = `X: ${Math.round(myData.x)}, Y: ${Math.round(myData.y)}<br>Dir: ${myData.direction}<br>接続: ${connectedCount}`;
     }
 
     const now = Date.now();
@@ -689,11 +775,11 @@ function updateRoomUI() {
     
     if (currentRoom === 'A') {
         document.body.style.background = "#a8d5ba";
-        roomName.textContent = "楽屋（配信外）";
+        roomName.textContent = "楽屋";
         roomBadge.classList.remove('room-b');
     } else {
         document.body.style.background = "#2a2a3a";
-        roomName.textContent = "ライブ会場（配信内）";
+        roomName.textContent = "ライブ会場";
         roomBadge.classList.add('room-b');
     }
 }
@@ -702,6 +788,13 @@ function draw() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // アニメーションフレーム更新
+    const now = Date.now();
+    if (now - lastAnimTime > ANIM_SPEED) {
+        animFrame = (animFrame + 1) % SPRITE_COLS;
+        lastAnimTime = now;
+    }
 
     if (!obsMode) {
         ctx.fillStyle = "rgba(255,255,255,0.5)";
@@ -712,6 +805,9 @@ function draw() {
             ctx.fillText("← ライブ会場", 15, PORTAL_Y);
             ctx.fillStyle = "rgba(255,100,100,0.3)";
             ctx.fillRect(0, PORTAL_Y - 20, 40, 40);
+            
+            // 椅子を描画
+            drawChairs();
         } else {
             ctx.textAlign = "right";
             ctx.fillText("楽屋 →", canvas.width - 15, PORTAL_Y);
@@ -720,67 +816,125 @@ function draw() {
         }
     }
 
-    drawChar(myData, true);
-    Object.values(players).forEach(p => drawChar(p, false));
+    // プレイヤーをY座標でソート
+    const allPlayers = [
+        { ...myData, isMe: true },
+        ...Object.values(players).map(p => ({ ...p, isMe: false }))
+    ].sort((a, b) => (a.y || 0) - (b.y || 0));
+    
+    allPlayers.forEach(p => drawChar(p, p.isMe));
     drawParticles();
+}
+
+function drawChairs() {
+    if (!chairSprite.complete) return;
+    
+    const chairW = chairSprite.naturalWidth / 2;
+    const chairH = chairSprite.naturalHeight;
+    const drawSize = 48;
+    
+    CHAIRS.forEach(chair => {
+        const sx = chair.dir === 'left' ? 0 : chairW;
+        ctx.drawImage(
+            chairSprite,
+            sx, 0, chairW, chairH,
+            chair.x - drawSize / 2, chair.y - drawSize / 2, drawSize, drawSize
+        );
+    });
 }
 
 function drawChar(p, isMe) {
     const charId = p.charId || "1";
-    if (!images[charId] || !images[charId].complete) return;
+    const sprite = spriteSheets[charId];
+    const fallback = staticImages[charId];
     
-    const img = images[charId];
     const x = p.x || 0;
     const y = p.y || 0;
     const z = p.z || 0;
+    const direction = p.direction || 'down';
+    const isMoving = p.isMoving || false;
+    const isSitting = p.isSitting || false;
 
-    const maxSize = 64;
-    let drawW, drawH;
-    
-    if (img.naturalWidth > img.naturalHeight) {
-        drawW = maxSize;
-        drawH = (img.naturalHeight / img.naturalWidth) * maxSize;
-    } else {
-        drawH = maxSize;
-        drawW = (img.naturalWidth / img.naturalHeight) * maxSize;
+    const drawSize = 56;
+    const drawY = y + z - drawSize / 2;
+
+    // スプライトシートを使用
+    if (sprite && sprite.complete && sprite.naturalWidth > 0) {
+        const frameW = sprite.naturalWidth / SPRITE_COLS;
+        const frameH = sprite.naturalHeight / SPRITE_ROWS;
+        
+        // 行を決定: 0=front(down), 1=back(up), 2=side(left/right)
+        let row = 0;
+        if (direction === 'up') row = 1;
+        else if (direction === 'left' || direction === 'right') row = 2;
+        else row = 0; // down
+        
+        // フレームを決定
+        let frame = isMoving ? animFrame : 0;
+        if (isSitting) frame = 0; // 座っているときは静止
+        
+        const sx = frame * frameW;
+        const sy = row * frameH;
+        
+        ctx.save();
+        
+        // 左右反転（右向きの場合）
+        if (direction === 'right') {
+            ctx.translate(x, 0);
+            ctx.scale(-1, 1);
+            ctx.drawImage(
+                sprite,
+                sx, sy, frameW, frameH,
+                -drawSize / 2, drawY, drawSize, drawSize
+            );
+        } else {
+            ctx.drawImage(
+                sprite,
+                sx, sy, frameW, frameH,
+                x - drawSize / 2, drawY, drawSize, drawSize
+            );
+        }
+        
+        ctx.restore();
+    } else if (fallback && fallback.complete) {
+        // フォールバック: 静的画像を使用
+        ctx.drawImage(fallback, x - drawSize / 2, drawY, drawSize, drawSize);
     }
 
-    const drawY = y + z - drawH / 2;
-    
-    ctx.drawImage(img, x - drawW / 2, drawY, drawW, drawH);
-
+    // 名前表示
     ctx.fillStyle = "#000";
     ctx.strokeStyle = "#fff";
     ctx.lineWidth = 3;
-    ctx.font = "13px 'Yusei Magic', sans-serif";
+    ctx.font = "11px 'Yusei Magic', sans-serif";
     ctx.textAlign = "center";
-    const nameY = y + z + drawH / 2 + 16;
+    const nameY = y + z + drawSize / 2 + 12;
     ctx.strokeText(p.name || "", x, nameY);
     ctx.fillText(p.name || "", x, nameY);
 
+    // 吹き出し
     if (p.msg) {
         const displayMsg = p.msg.substring(0, 20);
-        ctx.font = "12px 'Yusei Magic', sans-serif";
+        ctx.font = "10px 'Yusei Magic', sans-serif";
         const metrics = ctx.measureText(displayMsg);
-        const bubbleW = Math.min(metrics.width + 24, 180);
-        const bubbleH = 30;
+        const bubbleW = Math.min(metrics.width + 16, 140);
+        const bubbleH = 24;
         const bubbleX = x - bubbleW / 2;
-        const bubbleY = y + z - drawH / 2 - bubbleH - 12;
+        const bubbleY = y + z - drawSize / 2 - bubbleH - 8;
 
         ctx.fillStyle = "rgba(255,255,255,0.95)";
         ctx.beginPath();
-        ctx.roundRect(bubbleX, bubbleY, bubbleW, bubbleH, 12);
+        ctx.roundRect(bubbleX, bubbleY, bubbleW, bubbleH, 10);
         ctx.fill();
         
         ctx.beginPath();
-        ctx.moveTo(x - 6, bubbleY + bubbleH);
-        ctx.lineTo(x + 6, bubbleY + bubbleH);
-        ctx.lineTo(x, bubbleY + bubbleH + 8);
+        ctx.moveTo(x - 5, bubbleY + bubbleH);
+        ctx.lineTo(x + 5, bubbleY + bubbleH);
+        ctx.lineTo(x, bubbleY + bubbleH + 6);
         ctx.closePath();
         ctx.fill();
 
         ctx.fillStyle = "#333";
-        ctx.fillText(displayMsg, x, bubbleY + 20);
+        ctx.fillText(displayMsg, x, bubbleY + 16);
     }
 }
 
@@ -803,21 +957,49 @@ window.addEventListener('keyup', e => keys[e.key] = false);
 
 canvas.addEventListener('click', (e) => {
     const rect = canvas.getBoundingClientRect();
-    targetX = e.clientX - rect.left;
-    targetY = e.clientY - rect.top;
-    targetY = Math.max(MIN_Y, Math.min(MAX_Y, targetY));
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
+    
+    // 椅子クリックで座る
+    if (currentRoom === 'A' && !myData.isSitting) {
+        for (const chair of CHAIRS) {
+            const dist = Math.sqrt(Math.pow(clickX - chair.x, 2) + Math.pow(clickY - chair.y, 2));
+            if (dist < 30) {
+                myData.isSitting = true;
+                myData.sittingChair = chair;
+                myData.x = chair.x;
+                myData.y = chair.y;
+                myData.direction = chair.dir === 'left' ? 'left' : 'right';
+                targetX = null;
+                targetY = null;
+                return;
+            }
+        }
+    }
+    
+    // 通常移動
+    if (!myData.isSitting) {
+        targetX = clickX;
+        targetY = Math.max(MIN_Y, Math.min(MAX_Y, clickY));
+    }
 });
 
 let touchStartX = 0, touchStartY = 0;
 canvas.addEventListener('touchstart', (e) => {
     const touch = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
     touchStartX = touch.clientX;
     touchStartY = touch.clientY;
-    targetX = touch.clientX;
-    targetY = Math.max(MIN_Y, Math.min(MAX_Y, touch.clientY));
+    
+    if (!myData.isSitting) {
+        targetX = touch.clientX - rect.left;
+        targetY = Math.max(MIN_Y, Math.min(MAX_Y, touch.clientY - rect.top));
+    }
 });
 canvas.addEventListener('touchmove', (e) => {
     e.preventDefault();
+    if (myData.isSitting) return;
+    
     const touch = e.touches[0];
     const dx = touch.clientX - touchStartX;
     const dy = touch.clientY - touchStartY;
@@ -827,10 +1009,21 @@ canvas.addEventListener('touchmove', (e) => {
     touchStartY = touch.clientY;
     targetX = null;
     targetY = null;
+    
+    // 方向更新
+    if (Math.abs(dx) > Math.abs(dy)) {
+        myData.direction = dx > 0 ? 'right' : 'left';
+    } else if (dy !== 0) {
+        myData.direction = dy > 0 ? 'down' : 'up';
+    }
+    myData.isMoving = true;
+});
+canvas.addEventListener('touchend', () => {
+    myData.isMoving = false;
 });
 
 // ==========================================
-// 10. チャット機能 (サーバー経由送信に変更)
+// 10. チャット機能
 // ==========================================
 document.getElementById('send-btn').addEventListener('click', sendChat);
 document.getElementById('chat-input').addEventListener('keydown', (e) => {
@@ -851,26 +1044,28 @@ async function sendChat() {
     if (text === '/1218') {
         debugMode = !debugMode;
         debugInfo.style.display = debugMode ? 'block' : 'none';
-        addLog("System", debugMode ? "デバッグ情報 ON" : "デバッグ情報 OFF");
+        addLog("System", debugMode ? "デバッグ ON" : "デバッグ OFF");
+        input.value = "";
+        return;
+    }
+    if (text === '/stand' && myData.isSitting) {
+        myData.isSitting = false;
+        myData.sittingChair = null;
         input.value = "";
         return;
     }
 
-    // 文字数制限チェック
     if (text.length > 100) {
-        addLog("System", "文字数が多すぎます(100文字まで)");
+        addLog("System", "100文字まで");
         return;
     }
 
-    // 連投防止 (ボタンが無効なら送らない)
     if (sendBtn.disabled) return;
 
     try {
-        // ボタンを一時的に無効化
         sendBtn.disabled = true;
         sendBtn.style.opacity = "0.5";
 
-        // ★サーバーへ送信 (P2Pではありません！)
         const res = await fetch(`${SERVER_URL}/roomAction`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -888,7 +1083,6 @@ async function sendChat() {
             sendBtn.disabled = false;
             sendBtn.style.opacity = "1.0";
         } else {
-            // 成功したら5秒待機
             input.value = "";
             setTimeout(() => {
                 sendBtn.disabled = false;
@@ -919,26 +1113,20 @@ function toggleObsMode() {
 }
 
 function sendQuickChat(text) {
-    // クイックチャットもサーバー経由にする場合はここを変えますが
-    // 演出優先でP2Pのままでも良いですし、制限をかけたいなら sendChat と同じ仕組みにします。
-    // 今回は整合性を取るため、sendChatと同じくサーバー経由にします。
-    
-    // (inputに値を入れてsendChatを呼ぶのが楽です)
     const input = document.getElementById('chat-input');
     const oldVal = input.value;
     input.value = text;
-    sendChat(); // サーバー経由で送信
+    sendChat();
     input.value = oldVal;
     
-    // エフェクトは自分の画面だけ即出し
     if (text.includes('ナイス')) {
         spawnParticles('nice');
         broadcastToAll("effect", { effectType: 'nice' });
-        if (myData.z === 0) myData.vz = JUMP_FORCE;
+        if (myData.z === 0 && !myData.isSitting) myData.vz = JUMP_FORCE;
     } else if (text.includes('おめでとう')) {
         spawnParticles('congrats');
         broadcastToAll("effect", { effectType: 'congrats' });
-        if (myData.z === 0) myData.vz = JUMP_FORCE;
+        if (myData.z === 0 && !myData.isSitting) myData.vz = JUMP_FORCE;
     }
     
     toggleQuickChat();
@@ -956,7 +1144,7 @@ function addLog(name, text) {
     item.innerHTML = `<span class="log-name">${name}:</span> ${text}`;
     list.prepend(item);
 
-    while (list.children.length > 50) {
+    while (list.children.length > 30) {
         list.removeChild(list.lastChild);
     }
 }
@@ -978,19 +1166,26 @@ async function performExit() {
     Object.keys(peers).forEach(closePeerConnection);
     if (eventSource) eventSource.close();
 
-    // ★ビーコン送信に変更（タブ閉じ対策）
-    navigator.sendBeacon(`${SERVER_URL}/roomAction`, JSON.stringify({ uuid: myUuid, action: "leave" }));
+    navigator.sendBeacon(`${SERVER_URL}/roomAction`, JSON.stringify({ 
+        uuid: myUuid, 
+        action: "leave",
+        isRefresh: false
+    }));
 
     showError("退室しました。10分間再入室できません。");
     setTimeout(() => location.reload(), 2000);
 }
 
 // ==========================================
-// 12. ページ離脱時
+// 12. ページ離脱時（F5含む）
 // ==========================================
 window.addEventListener('beforeunload', () => {
-    // 退出処理はビーコンで
-    navigator.sendBeacon(`${SERVER_URL}/roomAction`, JSON.stringify({ uuid: myUuid, action: "leave" }));
+    // F5やタブ閉じでもペナルティ
+    navigator.sendBeacon(`${SERVER_URL}/roomAction`, JSON.stringify({ 
+        uuid: myUuid, 
+        action: "leave",
+        isRefresh: true 
+    }));
     
     if (eventSource) eventSource.close();
     Object.keys(peers).forEach(uuid => {

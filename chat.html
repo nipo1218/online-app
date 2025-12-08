@@ -14,10 +14,10 @@
             <p class="subtitle">アバターをえらんでね</p>
             
             <div class="char-select">
-                <div class="char-opt selected" data-id="1"><img src="1.png" alt="1"></div>
-                <div class="char-opt" data-id="2"><img src="2.png" alt="2"></div>
-                <div class="char-opt" data-id="3"><img src="3.png" alt="3"></div>
-                <div class="char-opt" data-id="4"><img src="4.png" alt="4"></div>
+                <div class="char-opt selected" data-id="1"><div class="char-preview" data-char="1"></div></div>
+                <div class="char-opt" data-id="2"><div class="char-preview" data-char="2"></div></div>
+                <div class="char-opt" data-id="3"><div class="char-preview" data-char="3"></div></div>
+                <div class="char-opt" data-id="4"><div class="char-preview" data-char="4"></div></div>
             </div>
             <input type="text" id="username" placeholder="おなまえ" maxlength="8" title="">
             <button id="start-btn">はじめる</button>
@@ -62,7 +62,7 @@
 
     <div id="log-overlay">
         <div class="log-header">
-            <h3>チャットログ</h3>
+            <h3>ログ</h3>
             <span class="log-close" onclick="toggleLog()">✕</span>
         </div>
         <div class="log-list" id="log-list"></div>
@@ -75,15 +75,15 @@
         <div class="quick-btn" onclick="sendQuickChat('またね👋')">またね👋</div>
     </div>
 
-    <button id="obs-exit-btn" onclick="toggleObsMode()">OBSモードを解除</button>
+    <button id="obs-exit-btn" onclick="toggleObsMode()">OBS解除</button>
 
     <div id="bottom-ui">
         <div class="bottom-top-row">
             <div id="room-badge">
                 <span class="room-icon"></span>
-                <span id="room-name">楽屋（配信外）</span>
+                <span id="room-name">楽屋</span>
             </div>
-            <button id="exit-btn" onclick="openExitModal()">退室する</button>
+            <button id="exit-btn" onclick="openExitModal()">退室</button>
         </div>
         <div class="bottom-chat-row">
             <div class="chat-ui-btn" onclick="toggleLog()">📋</div>
