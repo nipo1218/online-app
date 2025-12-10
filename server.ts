@@ -139,8 +139,8 @@ async function handleApi(req: Request, url: URL) {
       const now = Date.now();
 
       if (action === "chat") {
-          if (!message || message.length > 100) {
-              return new Response(JSON.stringify({ error: "文字数が多すぎます" }), { status: 400, headers: corsHeaders });
+          if (!message || message.length > 30) {
+              return new Response(JSON.stringify({ error: "30文字以内で入力してください" }), { status: 400, headers: corsHeaders });
           }
           const existing = await kv.get<UserState>(["users", uuid]);
           if (!existing.value) return new Response(JSON.stringify({ error: "ログインしていません" }), { status: 403, headers: corsHeaders });

@@ -19,56 +19,80 @@ body {
     margin: 0; 
     overflow: hidden; 
     font-family: var(--main-font);
-    background: #a8d5ba; 
+    background: #1a1a2e; 
     color: var(--text-main);
     touch-action: none;
-    width: 100%; 
-    height: 100%;
-    min-height: 100vh;
+    width: 398px; 
+    height: 385px;
+    max-width: 398px;
+    max-height: 385px;
     transition: background 0.3s;
     user-select: none;
     -webkit-user-select: none;
+    position: relative;
 }
 
 canvas { 
     display: block; 
-    width: 100%; 
-    height: 100%; 
+    width: 398px; 
+    height: 385px; 
     position: absolute;
     top: 0;
     left: 0;
 }
 
-/* === ログイン画面 (コンパクト) === */
+/* === ログイン画面 (398x385対応) === */
 #login-screen {
     position: absolute; 
     top: 0; left: 0; 
-    width: 100%; height: 100%;
+    width: 398px; height: 385px;
     display: flex; 
     flex-direction: column;
     align-items: center; 
     justify-content: center; 
     z-index: 9999;
-    background: #fff;
+    background: 
+        linear-gradient(135deg, rgba(255,182,193,0.3) 0%, transparent 50%),
+        linear-gradient(225deg, rgba(173,216,230,0.3) 0%, transparent 50%),
+        linear-gradient(315deg, rgba(255,255,224,0.3) 0%, transparent 50%),
+        linear-gradient(45deg, rgba(221,160,221,0.3) 0%, transparent 50%),
+        linear-gradient(to bottom right, #FFF5F5, #F0FFF0, #F5F5FF, #FFFAF0);
     transition: opacity 0.5s;
-    padding: 8px;
+    padding: 0;
+}
+
+/* ステンドグラス風の装飾 */
+#login-screen::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: 
+        radial-gradient(circle at 20% 20%, rgba(255,192,203,0.4) 0%, transparent 30%),
+        radial-gradient(circle at 80% 30%, rgba(176,224,230,0.4) 0%, transparent 25%),
+        radial-gradient(circle at 30% 70%, rgba(255,250,205,0.4) 0%, transparent 30%),
+        radial-gradient(circle at 70% 80%, rgba(216,191,216,0.4) 0%, transparent 25%),
+        radial-gradient(circle at 50% 50%, rgba(255,228,225,0.3) 0%, transparent 40%);
+    pointer-events: none;
 }
 
 .login-card {
     text-align: center; 
-    width: 100%; 
-    max-width: 280px;
-    background: #fff;
-    padding: 12px 16px;
-    border-radius: 16px;
-    box-shadow: none;
-    border: none;
+    width: 90%; 
+    max-width: 300px;
+    background: rgba(255, 255, 255, 0.92);
+    padding: 15px 20px;
+    border-radius: 20px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+    border: 1px solid rgba(255,255,255,0.8);
+    backdrop-filter: blur(10px);
+    position: relative;
+    z-index: 1;
 }
 
 .login-card h2 { 
-    margin: 0 0 4px 0; 
+    margin: 0 0 5px 0; 
     color: var(--deep-rose); 
-    font-size: 18px; 
+    font-size: 20px; 
     letter-spacing: 1px; 
     font-family: var(--main-font); 
 }
@@ -76,10 +100,10 @@ canvas {
 .login-card .subtitle {
     font-size: 11px; 
     color: #aaa; 
-    margin-bottom: 10px;
+    margin-bottom: 12px;
 }
 
-/* キャラ選択 (コンパクト) */
+/* キャラ選択 (アスペクト比維持) */
 .char-select { 
     display: flex; 
     gap: 6px; 
@@ -93,12 +117,13 @@ canvas {
     border: 2px solid #f0f0f0; 
     padding: 4px; 
     border-radius: 10px; 
-    width: 44px; 
-    height: 44px;
+    width: 50px; 
+    height: 50px;
     display: flex; 
     align-items: center; 
     justify-content: center;
     transition: all 0.2s; 
+    overflow: hidden;
 }
 
 .char-opt.selected { 
@@ -109,16 +134,16 @@ canvas {
 }
 
 .char-opt img { 
-    width: 100%; 
-    height: 100%; 
+    max-width: 100%; 
+    max-height: 100%; 
     object-fit: contain;
     image-rendering: pixelated;
 }
 
-/* スプライトシートからのプレビュー */
+/* スプライトシートからのプレビュー（アスペクト比維持） */
 .char-preview {
-    width: 100%;
-    height: 100%;
+    width: 40px;
+    height: 40px;
     background-size: 400% 300%;
     background-position: 0 0;
     image-rendering: pixelated;
@@ -271,22 +296,23 @@ button#start-btn:active {
 }
 
 /* ========================================
-   下部統合UI (コンパクト)
+   下部統合UI (398x385対応)
 ======================================== */
 #bottom-ui {
     position: absolute;
     bottom: 0;
     left: 0;
     right: 0;
-    background: rgba(255, 255, 255, 0.95);
+    width: 398px;
+    background: rgba(255, 255, 255, 0.92);
     backdrop-filter: blur(10px);
     border-top: 1px solid rgba(255,255,255,0.8);
-    padding: 6px 8px 10px 8px;
+    padding: 4px 6px 6px 6px;
     z-index: 100;
     display: none;
     flex-direction: column;
-    gap: 6px;
-    box-shadow: 0 -3px 20px rgba(0,0,0,0.06);
+    gap: 4px;
+    box-shadow: 0 -3px 15px rgba(0,0,0,0.08);
 }
 
 .bottom-top-row {
@@ -299,37 +325,37 @@ button#start-btn:active {
 #room-badge {
     display: flex;
     align-items: center;
-    gap: 5px;
-    font-size: 11px;
+    gap: 4px;
+    font-size: 10px;
     font-weight: 600;
     color: #333;
 }
 
 #room-badge .room-icon {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
     background: #4CAF50;
-    box-shadow: 0 0 6px rgba(76, 175, 80, 0.5);
+    box-shadow: 0 0 4px rgba(76, 175, 80, 0.5);
 }
 
 #room-badge.room-b .room-icon {
     background: #f44336;
-    box-shadow: 0 0 6px rgba(244, 67, 54, 0.5);
+    box-shadow: 0 0 4px rgba(244, 67, 54, 0.5);
 }
 
 #exit-btn {
-    padding: 5px 10px;
+    padding: 4px 8px;
     background: linear-gradient(135deg, #e62e5c 0%, #d32f4f 100%);
     color: white;
     border: none;
-    border-radius: 12px;
-    font-size: 10px;
+    border-radius: 10px;
+    font-size: 9px;
     font-weight: 600;
     font-family: var(--main-font);
     cursor: pointer;
     transition: all 0.2s;
-    box-shadow: 0 2px 8px rgba(230, 46, 92, 0.25);
+    box-shadow: 0 2px 6px rgba(230, 46, 92, 0.25);
 }
 
 #exit-btn:active {
@@ -339,12 +365,12 @@ button#start-btn:active {
 .bottom-chat-row {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 3px;
 }
 
 .chat-ui-btn {
-    width: 32px; 
-    height: 32px; 
+    width: 28px; 
+    height: 28px; 
     flex-shrink: 0;
     border-radius: 50%; 
     border: none;
@@ -352,10 +378,10 @@ button#start-btn:active {
     justify-content: center; 
     align-items: center;
     cursor: pointer; 
-    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.06);
     font-family: var(--main-font); 
     background: #fff;
-    font-size: 14px;
+    font-size: 12px;
     transition: all 0.2s;
 }
 
@@ -366,12 +392,12 @@ button#start-btn:active {
 #chat-input { 
     flex: 1; 
     min-width: 0; 
-    height: 32px; 
-    padding: 0 12px;
-    border: 2px solid #f0f0f0; 
-    border-radius: 16px;
+    height: 28px; 
+    padding: 0 10px;
+    border: 1.5px solid #f0f0f0; 
+    border-radius: 14px;
     background: #fff;
-    font-size: 12px; 
+    font-size: 11px; 
     outline: none; 
     font-family: var(--main-font);
 }
@@ -384,7 +410,7 @@ button#start-btn:active {
 #send-btn {
     background: linear-gradient(135deg, #ff9a9e 0%, #ff758c 100%) !important;
     color: white !important;
-    box-shadow: 0 2px 10px rgba(255, 117, 140, 0.25) !important;
+    box-shadow: 0 2px 8px rgba(255, 117, 140, 0.25) !important;
 }
 
 /* === デバッグ情報 === */
@@ -424,26 +450,26 @@ button#start-btn:active {
     transition: all 0.2s;
 }
 
-/* === チャットログ (コンパクト) === */
+/* === チャットログ (398x385対応) === */
 #log-overlay {
     display: none; 
     position: absolute; 
-    bottom: 65px; 
-    left: 6px; 
-    width: 180px; 
-    max-height: 120px;
+    bottom: 50px; 
+    left: 4px; 
+    width: 160px; 
+    max-height: 100px;
     background: rgba(255, 255, 255, 0.95); 
     backdrop-filter: blur(10px);
-    border-radius: 14px; 
+    border-radius: 12px; 
     border: 1px solid rgba(255, 255, 255, 0.9);
     flex-direction: column; 
     overflow: hidden; 
     z-index: 150;
-    box-shadow: 0 6px 25px rgba(0,0,0,0.1);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
 }
 
 .log-header {
-    padding: 6px 10px;
+    padding: 4px 8px;
     border-bottom: 1px solid rgba(0,0,0,0.05);
     display: flex;
     justify-content: space-between;
@@ -453,7 +479,7 @@ button#start-btn:active {
 
 .log-header h3 {
     margin: 0;
-    font-size: 10px;
+    font-size: 9px;
     color: var(--deep-rose);
     font-family: var(--main-font);
     font-weight: 600;
@@ -461,7 +487,7 @@ button#start-btn:active {
 
 .log-close {
     cursor: pointer;
-    font-size: 14px;
+    font-size: 12px;
     color: #ccc;
     transition: color 0.2s;
 }
@@ -473,17 +499,17 @@ button#start-btn:active {
 .log-list { 
     flex: 1; 
     overflow-y: auto; 
-    padding: 6px; 
+    padding: 4px; 
     display: flex; 
     flex-direction: column-reverse; 
-    gap: 4px; 
+    gap: 3px; 
 }
 
 .log-item { 
-    font-size: 10px; 
+    font-size: 9px; 
     background: rgba(255,255,255,0.8); 
-    padding: 5px 8px; 
-    border-radius: 8px; 
+    padding: 4px 6px; 
+    border-radius: 6px; 
     word-break: break-all;
     font-family: var(--main-font);
     line-height: 1.3;
@@ -492,33 +518,33 @@ button#start-btn:active {
 .log-name { 
     font-weight: 600; 
     color: var(--deep-rose); 
-    margin-right: 4px; 
+    margin-right: 3px; 
 }
 
-/* === 定型文ポップアップ (コンパクト) === */
+/* === 定型文ポップアップ (398x385対応) === */
 #quick-chat-popup {
     display: none; 
     position: absolute; 
-    bottom: 65px; 
-    right: 6px;
+    bottom: 50px; 
+    right: 4px;
     background: rgba(255,255,255,0.98); 
-    padding: 8px; 
-    border-radius: 14px;
+    padding: 6px; 
+    border-radius: 12px;
     z-index: 150; 
     flex-direction: column; 
-    gap: 4px; 
+    gap: 3px; 
     backdrop-filter: blur(10px);
-    box-shadow: 0 6px 25px rgba(0,0,0,0.1);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
     border: 1px solid rgba(255,255,255,0.9);
 }
 
 .quick-btn {
     background: #fff; 
-    border: 1.5px solid #ffdeeb; 
-    padding: 6px 10px;
-    border-radius: 12px; 
+    border: 1px solid #ffdeeb; 
+    padding: 5px 8px;
+    border-radius: 10px; 
     cursor: pointer; 
-    font-size: 10px; 
+    font-size: 9px; 
     font-weight: 600;
     font-family: var(--main-font);
     transition: all 0.2s;
@@ -535,70 +561,4 @@ button#start-btn:active {
     transform: scale(0.95);
 }
 
-/* === レスポンシブ (より小さい画面) === */
-@media (max-width: 400px), (max-height: 400px) {
-    .login-card {
-        padding: 10px 12px;
-        max-width: 260px;
-    }
-    
-    .login-card h2 {
-        font-size: 16px;
-    }
-    
-    .char-opt {
-        width: 40px;
-        height: 40px;
-    }
-    
-    #bottom-ui {
-        padding: 5px 6px 8px 6px;
-        gap: 4px;
-    }
-    
-    .chat-ui-btn {
-        width: 28px;
-        height: 28px;
-        font-size: 12px;
-    }
-    
-    #chat-input {
-        height: 28px;
-        font-size: 11px;
-        padding: 0 10px;
-    }
-    
-    #log-overlay {
-        width: 150px;
-        max-height: 100px;
-        bottom: 55px;
-    }
-    
-    #quick-chat-popup {
-        bottom: 55px;
-    }
-    
-    .quick-btn {
-        padding: 5px 8px;
-        font-size: 9px;
-    }
-    
-    .modal-box {
-        width: 92%;
-        padding: 12px 10px;
-        max-width: 240px;
-    }
-    
-    .modal-box h3 {
-        font-size: 13px;
-    }
-    
-    .modal-box p {
-        font-size: 11px;
-    }
-    
-    .modal-btn {
-        padding: 7px 14px;
-        font-size: 11px;
-    }
-}
+/* 398x385固定サイズ */

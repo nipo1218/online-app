@@ -4,37 +4,60 @@ const SERVER_URL = "";
 
 // --- 設定 ---
 const RTC_CONFIG = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
-const SPEED = 2.0;
+const SPEED = 1.0; // 移動速度（半分に）
 const HEARTBEAT_INTERVAL = 8 * 60 * 1000;
 
-// ジャンプ設定
-const JUMP_FORCE = -6;
-const GRAVITY = 0.3;
-
-// Y座標制限
-const MIN_Y = 80;
-const MAX_Y = 188;
+// ジャンプ設定（ゆっくり）
+const JUMP_FORCE = -4;
+const GRAVITY = 0.15;
+const JUMP_COOLDOWN = 2000; // ジャンプ後2秒間は再ジャンプ不可
 
 // 初期位置
-const SPAWN_X = 200;
-const SPAWN_Y = 150;
+const SPAWN_X = 362;
+const SPAWN_Y = 217;
+
+// ライブ会場スポーン位置
+const LIVE_SPAWN_X = 368;
+const LIVE_SPAWN_Y = 202;
 
 // 部屋移動ポイント
-const PORTAL_X = 30;
-const PORTAL_Y = 80;
-const PORTAL_TOLERANCE = 15;
+const PORTAL_X = 20;
+const PORTAL_Y = 216;
+const PORTAL_TOLERANCE = 20;
 
 // スプライト設定
 const SPRITE_COLS = 4;
 const SPRITE_ROWS = 3;
 const ANIM_SPEED = 150; // ms per frame
+const WALK_PATTERN = [0, 1, 2, 1]; // 歩行アニメパターン: 1,2,3,2,1,2,3,2...
 
-// 椅子の位置（部屋Aに2つ配置）
-const CHAIRS = [
-    { x: 100, y: 160, dir: 'left' },
-    { x: 280, y: 160, dir: 'right' }
+// 画面サイズ（埋め込み用）
+const GAME_WIDTH = 398;
+const GAME_HEIGHT = 385;
+
+// Y座標制限
+const MIN_Y_ROOM_A = 186; // 楽屋
+const MIN_Y_ROOM_B = 177; // ライブ会場
+const MAX_Y = 320;
+
+// 楽屋の家具配置（絵文字で描画）
+const ROOM_A_FURNITURE = [
+    { type: 'chair', x: 140, y: 230, emoji: '🪑' },
+    { type: 'table', x: 199, y: 230, emoji: '🪵' },
+    { type: 'chair', x: 258, y: 230, emoji: '🪑' },
 ];
-const CHAIR_SIT_DIST = 20;
+
+// テーブル当たり判定
+const TABLE_COLLISION_DIST = 25;
+const CHAIR_SIT_DIST = 18;
+
+// 環境エフェクト（ライブ会場のライト）
+let ambientEffects = [];
+
+// デジョンエフェクト
+let isDejonActive = false;
+let dejonStartTime = 0;
+const DEJON_DURATION = 3000;
 
 // --- 状態管理 ---
 let eventSource = null;
@@ -72,7 +95,9 @@ let particles = [];
 
 // アニメーション
 let animFrame = 0;
+let walkPatternIndex = 0;
 let lastAnimTime = 0;
+let lastJumpTime = 0; // ジャンプクールダウン用
 
 // UUID永続化
 let myUuid = localStorage.getItem("game_uuid");
@@ -247,6 +272,28 @@ function openExitModal() {
 
 function closeExitModal() {
     document.getElementById('confirm-modal').style.display = 'none';
+}
+
+// ライブ会場確認モーダル
+let pendingLiveMove = false;
+
+function openLiveConfirmModal() {
+    if (pendingLiveMove) return; // 既に開いている場合は無視
+    pendingLiveMove = true;
+    document.getElementById('live-confirm-modal').style.display = 'flex';
+}
+
+function closeLiveConfirmModal() {
+    document.getElementById('live-confirm-modal').style.display = 'none';
+    pendingLiveMove = false;
+}
+
+function confirmGoToLive() {
+    closeLiveConfirmModal();
+    const w = GAME_WIDTH;
+    performRoomSwitch('B');
+    myData.x = w - 60;
+    myData.y = PORTAL_Y;
 }
 
 // ==========================================
@@ -522,26 +569,208 @@ function broadcastToAll(type, payload) {
 }
 
 // ==========================================
-// 7. パーティクルエフェクト
+// 7. パーティクルエフェクト（ド派手版・3秒間）
 // ==========================================
 function spawnParticles(effectType) {
-    const colors = effectType === 'nice' 
-        ? ['#FFD700', '#FFA500', '#FF6347', '#FF69B4', '#00CED1']
-        : ['#FF69B4', '#FFD700', '#7B68EE', '#00FA9A', '#FF6347'];
+    const PARTICLE_LIFE_DECAY = 0.0045; // 3秒間 (1 / (60fps * 3.7秒))
     
-    for (let i = 0; i < 50; i++) {
-        particles.push({
-            x: Math.random() * canvas.width,
-            y: -20,
-            vx: (Math.random() - 0.5) * 8,
-            vy: Math.random() * 3 + 2,
-            size: Math.random() * 12 + 6,
-            color: colors[Math.floor(Math.random() * colors.length)],
-            rotation: Math.random() * 360,
-            rotationSpeed: (Math.random() - 0.5) * 10,
-            life: 1,
-            type: effectType === 'nice' ? 'star' : 'confetti'
-        });
+    if (effectType === 'nice') {
+        // ナイス: 金色の星と拍手マーク、放射状に広がる
+        const colors = ['#FFD700', '#FFC107', '#FFEB3B', '#FF9800', '#FF5722'];
+        
+        // 大きな星を中央から放射
+        for (let i = 0; i < 30; i++) {
+            const angle = (Math.PI * 2 / 30) * i;
+            const speed = Math.random() * 4 + 3;
+            particles.push({
+                x: GAME_WIDTH / 2,
+                y: GAME_HEIGHT / 2,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                size: Math.random() * 20 + 15,
+                color: colors[Math.floor(Math.random() * colors.length)],
+                rotation: Math.random() * 360,
+                rotationSpeed: (Math.random() - 0.5) * 15,
+                life: 1,
+                decay: PARTICLE_LIFE_DECAY,
+                type: 'star',
+                glow: true
+            });
+        }
+        
+        // 上からキラキラ
+        for (let i = 0; i < 40; i++) {
+            particles.push({
+                x: Math.random() * GAME_WIDTH,
+                y: -30,
+                vx: (Math.random() - 0.5) * 3,
+                vy: Math.random() * 2 + 1,
+                size: Math.random() * 15 + 8,
+                color: colors[Math.floor(Math.random() * colors.length)],
+                rotation: Math.random() * 360,
+                rotationSpeed: (Math.random() - 0.5) * 20,
+                life: 1,
+                decay: PARTICLE_LIFE_DECAY,
+                type: 'sparkle'
+            });
+        }
+        
+        // 👏 絵文字エフェクト
+        for (let i = 0; i < 8; i++) {
+            particles.push({
+                x: Math.random() * GAME_WIDTH,
+                y: GAME_HEIGHT + 20,
+                vx: (Math.random() - 0.5) * 2,
+                vy: -(Math.random() * 3 + 2),
+                size: 30,
+                color: '#FFD700',
+                rotation: 0,
+                rotationSpeed: 0,
+                life: 1,
+                decay: PARTICLE_LIFE_DECAY,
+                type: 'emoji',
+                emoji: '👏'
+            });
+        }
+        
+    } else if (effectType === 'congrats') {
+        // おめでとう: レインボー紙吹雪＋キラキラ＋🎉
+        const colors = ['#FF1493', '#00BFFF', '#FFD700', '#32CD32', '#FF6347', '#9370DB', '#00FA9A'];
+        
+        // レインボー紙吹雪（大量に）
+        for (let i = 0; i < 80; i++) {
+            particles.push({
+                x: Math.random() * GAME_WIDTH,
+                y: -50 - Math.random() * 100,
+                vx: (Math.random() - 0.5) * 6,
+                vy: Math.random() * 2 + 1,
+                size: Math.random() * 15 + 8,
+                color: colors[Math.floor(Math.random() * colors.length)],
+                rotation: Math.random() * 360,
+                rotationSpeed: (Math.random() - 0.5) * 20,
+                life: 1,
+                decay: PARTICLE_LIFE_DECAY,
+                type: 'confetti'
+            });
+        }
+        
+        // 画面端からの爆発
+        for (let side = 0; side < 2; side++) {
+            const startX = side === 0 ? 0 : GAME_WIDTH;
+            for (let i = 0; i < 20; i++) {
+                const angle = side === 0 ? 
+                    (Math.random() * Math.PI / 2 - Math.PI / 4) : 
+                    (Math.random() * Math.PI / 2 + Math.PI * 3/4);
+                const speed = Math.random() * 6 + 4;
+                particles.push({
+                    x: startX,
+                    y: GAME_HEIGHT / 2,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed - 2,
+                    size: Math.random() * 18 + 10,
+                    color: colors[Math.floor(Math.random() * colors.length)],
+                    rotation: Math.random() * 360,
+                    rotationSpeed: (Math.random() - 0.5) * 25,
+                    life: 1,
+                    decay: PARTICLE_LIFE_DECAY,
+                    type: 'ribbon'
+                });
+            }
+        }
+        
+        // 🎉 絵文字エフェクト
+        for (let i = 0; i < 10; i++) {
+            particles.push({
+                x: Math.random() * GAME_WIDTH,
+                y: GAME_HEIGHT + 30,
+                vx: (Math.random() - 0.5) * 3,
+                vy: -(Math.random() * 4 + 3),
+                size: 35,
+                color: '#FF1493',
+                rotation: (Math.random() - 0.5) * 30,
+                rotationSpeed: (Math.random() - 0.5) * 5,
+                life: 1,
+                decay: PARTICLE_LIFE_DECAY,
+                type: 'emoji',
+                emoji: '🎉'
+            });
+        }
+        
+    } else if (effectType === 'kawaii') {
+        // かわいい: ピンクのハート大量
+        const colors = ['#FF69B4', '#FF1493', '#FFB6C1', '#FFC0CB', '#FF85A2', '#E75480'];
+        
+        // ハートを中央から放射
+        for (let i = 0; i < 25; i++) {
+            const angle = (Math.PI * 2 / 25) * i;
+            const speed = Math.random() * 3 + 2;
+            particles.push({
+                x: GAME_WIDTH / 2,
+                y: GAME_HEIGHT / 2,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                size: Math.random() * 25 + 20,
+                color: colors[Math.floor(Math.random() * colors.length)],
+                rotation: Math.random() * 30 - 15,
+                rotationSpeed: (Math.random() - 0.5) * 8,
+                life: 1,
+                decay: PARTICLE_LIFE_DECAY,
+                type: 'emoji',
+                emoji: '💕'
+            });
+        }
+        
+        // 上からハートが降ってくる
+        for (let i = 0; i < 50; i++) {
+            particles.push({
+                x: Math.random() * GAME_WIDTH,
+                y: -30 - Math.random() * 80,
+                vx: (Math.random() - 0.5) * 2,
+                vy: Math.random() * 1.5 + 0.8,
+                size: Math.random() * 20 + 15,
+                color: colors[Math.floor(Math.random() * colors.length)],
+                rotation: Math.random() * 360,
+                rotationSpeed: (Math.random() - 0.5) * 10,
+                life: 1,
+                decay: PARTICLE_LIFE_DECAY,
+                type: 'heart'
+            });
+        }
+        
+        // 💖 絵文字エフェクト（下から上へ）
+        for (let i = 0; i < 12; i++) {
+            particles.push({
+                x: Math.random() * GAME_WIDTH,
+                y: GAME_HEIGHT + 20,
+                vx: (Math.random() - 0.5) * 2,
+                vy: -(Math.random() * 2.5 + 1.5),
+                size: 28,
+                color: '#FF69B4',
+                rotation: 0,
+                rotationSpeed: (Math.random() - 0.5) * 3,
+                life: 1,
+                decay: PARTICLE_LIFE_DECAY,
+                type: 'emoji',
+                emoji: '💖'
+            });
+        }
+        
+        // キラキラ
+        for (let i = 0; i < 30; i++) {
+            particles.push({
+                x: Math.random() * GAME_WIDTH,
+                y: Math.random() * GAME_HEIGHT,
+                vx: (Math.random() - 0.5) * 1,
+                vy: (Math.random() - 0.5) * 1,
+                size: Math.random() * 12 + 6,
+                color: colors[Math.floor(Math.random() * colors.length)],
+                rotation: Math.random() * 360,
+                rotationSpeed: (Math.random() - 0.5) * 15,
+                life: 1,
+                decay: PARTICLE_LIFE_DECAY,
+                type: 'sparkle'
+            });
+        }
     }
 }
 
@@ -550,11 +779,24 @@ function updateParticles() {
         const p = particles[i];
         p.x += p.vx;
         p.y += p.vy;
-        p.vy += 0.1; 
-        p.rotation += p.rotationSpeed;
-        p.life -= 0.008;
         
-        if (p.life <= 0 || p.y > canvas.height + 50) {
+        // 重力（種類によって異なる）
+        if (p.type === 'confetti' || p.type === 'ribbon') {
+            p.vy += 0.05;
+            p.vx *= 0.99;
+        } else if (p.type === 'emoji') {
+            p.vy += 0.06;
+        } else if (p.type === 'heart') {
+            p.vy += 0.02; // ハートはゆっくり落ちる
+            p.vx += Math.sin(p.y * 0.05) * 0.1; // ゆらゆら
+        } else {
+            p.vy += 0.03;
+        }
+        
+        p.rotation += p.rotationSpeed;
+        p.life -= p.decay || 0.0045;
+        
+        if (p.life <= 0 || p.y > GAME_HEIGHT + 100) {
             particles.splice(i, 1);
         }
     }
@@ -565,16 +807,56 @@ function drawParticles() {
         ctx.save();
         ctx.translate(p.x, p.y);
         ctx.rotate(p.rotation * Math.PI / 180);
-        ctx.globalAlpha = p.life;
-        ctx.fillStyle = p.color;
+        ctx.globalAlpha = Math.min(p.life * 1.5, 1);
         
-        if (p.type === 'star') {
+        if (p.type === 'emoji') {
+            ctx.font = `${p.size}px serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(p.emoji, 0, 0);
+        } else if (p.type === 'star') {
+            if (p.glow) {
+                ctx.shadowColor = p.color;
+                ctx.shadowBlur = 15;
+            }
+            ctx.fillStyle = p.color;
             drawStar(0, 0, 5, p.size, p.size / 2);
-        } else {
-            ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+        } else if (p.type === 'sparkle') {
+            ctx.fillStyle = p.color;
+            ctx.shadowColor = p.color;
+            ctx.shadowBlur = 10;
+            const s = p.size / 2;
+            ctx.fillRect(-s/4, -s, s/2, s*2);
+            ctx.fillRect(-s, -s/4, s*2, s/2);
+        } else if (p.type === 'confetti') {
+            ctx.fillStyle = p.color;
+            ctx.fillRect(-p.size/2, -p.size/4, p.size, p.size/2);
+        } else if (p.type === 'ribbon') {
+            ctx.strokeStyle = p.color;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(-p.size/2, 0);
+            ctx.quadraticCurveTo(0, -p.size/3, p.size/2, 0);
+            ctx.stroke();
+        } else if (p.type === 'heart') {
+            ctx.fillStyle = p.color;
+            ctx.shadowColor = p.color;
+            ctx.shadowBlur = 8;
+            drawHeart(0, 0, p.size);
         }
         ctx.restore();
     });
+}
+
+function drawHeart(x, y, size) {
+    const s = size / 2;
+    ctx.beginPath();
+    ctx.moveTo(x, y + s * 0.3);
+    ctx.bezierCurveTo(x, y - s * 0.3, x - s, y - s * 0.3, x - s, y + s * 0.1);
+    ctx.bezierCurveTo(x - s, y + s * 0.6, x, y + s, x, y + s);
+    ctx.bezierCurveTo(x, y + s, x + s, y + s * 0.6, x + s, y + s * 0.1);
+    ctx.bezierCurveTo(x + s, y - s * 0.3, x, y - s * 0.3, x, y + s * 0.3);
+    ctx.fill();
 }
 
 function drawStar(cx, cy, spikes, outerRadius, innerRadius) {
@@ -597,6 +879,152 @@ function drawStar(cx, cy, spikes, outerRadius, innerRadius) {
 }
 
 // ==========================================
+// 環境エフェクト（ライブ会場のほわほわライト）
+// ==========================================
+function initAmbientEffects() {
+    ambientEffects = [];
+    const colors = ['#FF69B4', '#00BFFF', '#FFD700', '#9370DB', '#00FA9A', '#FF6347'];
+    
+    for (let i = 0; i < 15; i++) {
+        ambientEffects.push({
+            x: Math.random() * GAME_WIDTH,
+            y: Math.random() * GAME_HEIGHT,
+            size: Math.random() * 40 + 20,
+            color: colors[Math.floor(Math.random() * colors.length)],
+            alpha: Math.random() * 0.3 + 0.1,
+            speed: Math.random() * 0.5 + 0.2,
+            angle: Math.random() * Math.PI * 2,
+            pulse: Math.random() * Math.PI * 2
+        });
+    }
+}
+
+function updateAmbientEffects() {
+    if (currentRoom !== 'B') return;
+    
+    for (const e of ambientEffects) {
+        e.angle += 0.01;
+        e.pulse += 0.05;
+        e.x += Math.cos(e.angle) * e.speed;
+        e.y += Math.sin(e.angle) * e.speed * 0.5;
+        
+        // 画面内にラップ
+        if (e.x < -50) e.x = GAME_WIDTH + 50;
+        if (e.x > GAME_WIDTH + 50) e.x = -50;
+        if (e.y < -50) e.y = GAME_HEIGHT + 50;
+        if (e.y > GAME_HEIGHT + 50) e.y = -50;
+    }
+}
+
+function drawAmbientEffects() {
+    if (currentRoom !== 'B') return;
+    
+    for (const e of ambientEffects) {
+        const pulseSize = e.size + Math.sin(e.pulse) * 10;
+        const pulseAlpha = e.alpha + Math.sin(e.pulse * 0.7) * 0.1;
+        
+        const gradient = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, pulseSize);
+        gradient.addColorStop(0, e.color + Math.floor(pulseAlpha * 255).toString(16).padStart(2, '0'));
+        gradient.addColorStop(1, e.color + '00');
+        
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(e.x, e.y, pulseSize, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+// ==========================================
+// デジョンエフェクト（3秒かけて楽屋に戻る）
+// ==========================================
+function startDejonEffect() {
+    isDejonActive = true;
+    dejonStartTime = Date.now();
+    addLog("System", "デジョン詠唱開始...");
+    
+    // 詠唱中は移動不可
+    myData.isMoving = false;
+    targetX = null;
+    targetY = null;
+}
+
+function updateDejonEffect() {
+    if (!isDejonActive) return;
+    
+    const elapsed = Date.now() - dejonStartTime;
+    
+    if (elapsed >= DEJON_DURATION) {
+        // デジョン完了
+        isDejonActive = false;
+        myData.isSitting = false;
+        myData.sittingChair = null;
+        performRoomSwitch('A');
+        myData.x = SPAWN_X;
+        myData.y = SPAWN_Y;
+        addLog("System", "楽屋に戻りました");
+    }
+}
+
+function drawDejonEffect() {
+    if (!isDejonActive) return;
+    
+    const elapsed = Date.now() - dejonStartTime;
+    const progress = elapsed / DEJON_DURATION;
+    
+    // ほわんほわんエフェクト（波紋のような円）
+    const time = Date.now() * 0.005;
+    const x = myData.x;
+    const y = myData.y;
+    
+    // 複数の波紋
+    for (let i = 0; i < 3; i++) {
+        const phase = (time + i * 0.7) % 1;
+        const radius = 20 + phase * 60;
+        const alpha = (1 - phase) * 0.5 * (1 - progress * 0.5);
+        
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = '#88DDFF';
+        ctx.lineWidth = 3;
+        ctx.shadowColor = '#88DDFF';
+        ctx.shadowBlur = 15;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+    }
+    
+    // キラキラ
+    for (let i = 0; i < 8; i++) {
+        const angle = (time * 2 + i * Math.PI / 4) % (Math.PI * 2);
+        const dist = 30 + Math.sin(time * 3 + i) * 10;
+        const px = x + Math.cos(angle) * dist;
+        const py = y + Math.sin(angle) * dist;
+        const size = 4 + Math.sin(time * 5 + i * 2) * 2;
+        
+        ctx.save();
+        ctx.globalAlpha = 0.8;
+        ctx.fillStyle = '#AAEEFF';
+        ctx.shadowColor = '#AAEEFF';
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.arc(px, py, size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+    
+    // 画面全体のフェード
+    if (progress > 0.7) {
+        const fadeAlpha = (progress - 0.7) / 0.3;
+        ctx.save();
+        ctx.globalAlpha = fadeAlpha * 0.8;
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+        ctx.restore();
+    }
+}
+
+// ==========================================
 // 8. ゲームループ
 // ==========================================
 let lastBroadcast = 0;
@@ -604,17 +1032,43 @@ let prevX = SPAWN_X;
 let prevY = SPAWN_Y;
 
 function update() {
-    // 座っている場合は移動不可
+    // WASDキーの入力チェック
+    const hasMovementKey = keys['ArrowUp'] || keys['w'] || keys['W'] ||
+                           keys['ArrowDown'] || keys['s'] || keys['S'] ||
+                           keys['ArrowLeft'] || keys['a'] || keys['A'] ||
+                           keys['ArrowRight'] || keys['d'] || keys['D'];
+    
+    // WASDが押されたらクリック移動をキャンセル
+    if (hasMovementKey) {
+        targetX = null;
+        targetY = null;
+    }
+    
+    // 座っている場合
     if (myData.isSitting) {
         myData.isMoving = false;
         
-        // スペースキーで立ち上がる
-        if (keys[' '] || keys['Space']) {
+        // スペースキー、WASDキー、クリック移動で立ち上がる
+        if (keys[' '] || keys['Space'] || hasMovementKey || targetX !== null) {
             myData.isSitting = false;
+            // 椅子から少し離れた位置に移動
+            if (myData.sittingChair) {
+                const chair = myData.sittingChair;
+                if (chair.dir === 'left') {
+                    myData.x = chair.x - 25;
+                } else if (chair.dir === 'right') {
+                    myData.x = chair.x + 25;
+                } else {
+                    myData.y = chair.y + 25; // 後ろ向き椅子の場合
+                }
+            }
             myData.sittingChair = null;
+            keys[' '] = false;
+            keys['Space'] = false;
         }
         
         updateParticles();
+        updateAmbientEffects();
         const now = Date.now();
         if (now - lastBroadcast > 100) {
             broadcastToAll("update", { data: myData });
@@ -645,7 +1099,11 @@ function update() {
         }
         
         if ((keys[' '] || keys['Space']) && myData.z === 0) {
-            myData.vz = JUMP_FORCE;
+            const now = Date.now();
+            if (now - lastJumpTime >= JUMP_COOLDOWN) {
+                myData.vz = JUMP_FORCE;
+                lastJumpTime = now;
+            }
         }
     }
 
@@ -685,46 +1143,53 @@ function update() {
         }
     }
 
-    myData.y = Math.max(MIN_Y, Math.min(MAX_Y, myData.y));
-    const w = canvas.width || window.innerWidth;
+    myData.y = Math.max(currentRoom === 'A' ? MIN_Y_ROOM_A : MIN_Y_ROOM_B, Math.min(MAX_Y, myData.y));
+    const w = GAME_WIDTH;
     myData.x = Math.max(30, Math.min(w - 30, myData.x));
 
-    // 椅子に座る判定（部屋Aのみ）
+    // 楽屋の家具判定
     if (currentRoom === 'A') {
-        for (const chair of CHAIRS) {
-            const dist = Math.sqrt(Math.pow(myData.x - chair.x, 2) + Math.pow(myData.y - chair.y, 2));
-            if (dist < CHAIR_SIT_DIST && !myData.isMoving) {
-                // クリックで座る
-                if (keys['Enter'] || keys['e'] || keys['E']) {
+        for (const furniture of ROOM_A_FURNITURE) {
+            const dist = Math.sqrt(Math.pow(myData.x - furniture.x, 2) + Math.pow(myData.y - furniture.y, 2));
+            
+            if (furniture.type === 'table') {
+                // テーブルは障害物（押し戻す）
+                if (dist < TABLE_COLLISION_DIST) {
+                    const angle = Math.atan2(myData.y - furniture.y, myData.x - furniture.x);
+                    myData.x = furniture.x + Math.cos(angle) * TABLE_COLLISION_DIST;
+                    myData.y = furniture.y + Math.sin(angle) * TABLE_COLLISION_DIST;
+                    targetX = null;
+                    targetY = null;
+                }
+            } else if (furniture.type === 'chair') {
+                // 椅子は座れる
+                if (dist < CHAIR_SIT_DIST && !myData.isSitting) {
                     myData.isSitting = true;
-                    myData.sittingChair = chair;
-                    myData.x = chair.x;
-                    myData.y = chair.y;
-                    myData.direction = chair.dir === 'left' ? 'left' : 'right';
-                    break;
+                    myData.sittingChair = furniture;
+                    myData.x = furniture.x;
+                    myData.y = furniture.y;
+                    myData.direction = 'down'; // 椅子に座ったら正面向き
                 }
             }
         }
     }
+    
+    // ライブ会場は立ち席なので椅子判定なし
 
-    // 部屋移動
+    // 部屋移動（楽屋→ライブ会場のみ、確認モーダル表示）
     if (currentRoom === 'A') {
         if (myData.x <= PORTAL_X + PORTAL_TOLERANCE && 
             Math.abs(myData.y - PORTAL_Y) <= PORTAL_TOLERANCE) {
-            performRoomSwitch('B');
-            myData.x = w - 60;
-            myData.y = PORTAL_Y;
-        }
-    } else {
-        if (myData.x >= w - PORTAL_X - PORTAL_TOLERANCE && 
-            Math.abs(myData.y - PORTAL_Y) <= PORTAL_TOLERANCE) {
-            performRoomSwitch('A');
-            myData.x = 60;
-            myData.y = PORTAL_Y;
+            // ポータルに入ったら確認モーダルを表示
+            myData.x = PORTAL_X + PORTAL_TOLERANCE + 10; // 少し戻す
+            openLiveConfirmModal();
         }
     }
+    // ライブ会場から楽屋へは戻れない（ポータル無効化）
 
     updateParticles();
+    updateAmbientEffects();
+    updateDejonEffect();
 
     if (debugMode) {
         const connectedCount = Object.keys(dataChannels).length + 1;
@@ -746,6 +1211,13 @@ async function performRoomSwitch(newRoom) {
 
     currentRoom = newRoom;
     updateRoomUI();
+    
+    // ライブ会場に入ったらエフェクト初期化とスポーン位置設定
+    if (newRoom === 'B') {
+        initAmbientEffects();
+        myData.x = LIVE_SPAWN_X;
+        myData.y = LIVE_SPAWN_Y;
+    }
 
     try {
         await fetch(`${SERVER_URL}/roomAction`, {
@@ -773,47 +1245,61 @@ function updateRoomUI() {
         return;
     }
     
+    // 背景はCanvas内で描画するので、bodyは透明か黒
+    document.body.style.background = "#0d0812";
+    
     if (currentRoom === 'A') {
-        document.body.style.background = "#a8d5ba";
         roomName.textContent = "楽屋";
         roomBadge.classList.remove('room-b');
     } else {
-        document.body.style.background = "#2a2a3a";
         roomName.textContent = "ライブ会場";
         roomBadge.classList.add('room-b');
     }
 }
 
 function draw() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    // 固定サイズ
+    canvas.width = GAME_WIDTH;
+    canvas.height = GAME_HEIGHT;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // アニメーションフレーム更新
     const now = Date.now();
     if (now - lastAnimTime > ANIM_SPEED) {
-        animFrame = (animFrame + 1) % SPRITE_COLS;
+        walkPatternIndex = (walkPatternIndex + 1) % WALK_PATTERN.length;
+        animFrame = WALK_PATTERN[walkPatternIndex];
         lastAnimTime = now;
     }
 
+    // 背景描画
+    drawBackground();
+    
+    // ライブ会場のほわほわエフェクト（キャラの後ろ）
+    if (currentRoom === 'B') {
+        drawAmbientEffects();
+    }
+
     if (!obsMode) {
-        ctx.fillStyle = "rgba(255,255,255,0.5)";
-        ctx.font = "11px 'Yusei Magic', sans-serif";
-        
         if (currentRoom === 'A') {
+            // ポータル
+            ctx.fillStyle = "rgba(255,255,255,0.7)";
+            ctx.font = "10px 'Yusei Magic', sans-serif";
             ctx.textAlign = "left";
-            ctx.fillText("← ライブ会場", 15, PORTAL_Y);
-            ctx.fillStyle = "rgba(255,100,100,0.3)";
-            ctx.fillRect(0, PORTAL_Y - 20, 40, 40);
+            ctx.fillText("← LIVE", 5, PORTAL_Y - 15);
             
-            // 椅子を描画
-            drawChairs();
-        } else {
-            ctx.textAlign = "right";
-            ctx.fillText("楽屋 →", canvas.width - 15, PORTAL_Y);
-            ctx.fillStyle = "rgba(100,255,100,0.3)";
-            ctx.fillRect(canvas.width - 40, PORTAL_Y - 20, 40, 40);
+            // ポータルエリア
+            const portalGrad = ctx.createRadialGradient(0, PORTAL_Y, 0, 0, PORTAL_Y, 40);
+            portalGrad.addColorStop(0, 'rgba(255,100,200,0.5)');
+            portalGrad.addColorStop(1, 'rgba(255,100,200,0)');
+            ctx.fillStyle = portalGrad;
+            ctx.beginPath();
+            ctx.arc(0, PORTAL_Y, 40, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // 楽屋の家具を描画
+            drawRoomAFurniture();
         }
+        // ライブ会場は立ち席なので椅子なし
     }
 
     // プレイヤーをY座標でソート
@@ -822,25 +1308,155 @@ function draw() {
         ...Object.values(players).map(p => ({ ...p, isMe: false }))
     ].sort((a, b) => (a.y || 0) - (b.y || 0));
     
-    allPlayers.forEach(p => drawChar(p, p.isMe));
+    allPlayers.forEach(p => {
+        drawChar(p, p.isMe);
+    });
+    
     drawParticles();
+    drawDejonEffect();
 }
 
-function drawChairs() {
-    if (!chairSprite.complete) return;
+// 背景描画
+function drawBackground() {
+    if (currentRoom === 'A') {
+        // 楽屋：おしゃれなお部屋風
+        // 壁（パステルピンクベージュ）
+        const wallGrad = ctx.createLinearGradient(0, 0, 0, 186);
+        wallGrad.addColorStop(0, '#FFF5F5');
+        wallGrad.addColorStop(1, '#FFE4E1');
+        ctx.fillStyle = wallGrad;
+        ctx.fillRect(0, 0, GAME_WIDTH, 186);
+        
+        // 床（明るいウッドフローリング）
+        const floorGrad = ctx.createLinearGradient(0, 186, 0, GAME_HEIGHT);
+        floorGrad.addColorStop(0, '#DEB887');
+        floorGrad.addColorStop(1, '#D2A679');
+        ctx.fillStyle = floorGrad;
+        ctx.fillRect(0, 186, GAME_WIDTH, GAME_HEIGHT - 186);
+        
+        // フローリングパターン
+        ctx.strokeStyle = 'rgba(139, 90, 43, 0.12)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 15; i++) {
+            const y = 186 + i * 14;
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(GAME_WIDTH, y);
+            ctx.stroke();
+        }
+        
+        // 壁の下部装飾ライン
+        ctx.fillStyle = '#DCCCC0';
+        ctx.fillRect(0, 175, GAME_WIDTH, 11);
+        
+        // 絵文字で装飾
+        ctx.font = '28px serif';
+        ctx.textAlign = 'center';
+        
+        // 窓
+        ctx.fillText('🪟', 320, 80);
+        ctx.fillText('🪟', 80, 80);
+        
+        // カーテン
+        ctx.font = '22px serif';
+        ctx.fillText('🎀', 320, 50);
+        ctx.fillText('🎀', 80, 50);
+        
+        // 時計
+        ctx.font = '20px serif';
+        ctx.fillText('🕐', 200, 55);
+        
+        // 植物
+        ctx.font = '24px serif';
+        ctx.fillText('🪴', 370, 165);
+        ctx.fillText('🌸', 30, 165);
+        
+        // 額縁
+        ctx.font = '18px serif';
+        ctx.fillText('🖼️', 150, 80);
+        ctx.fillText('🖼️', 250, 80);
+        
+    } else {
+        // ライブ会場：ステージ風
+        // 暗い背景
+        const bgGrad = ctx.createRadialGradient(GAME_WIDTH/2, 50, 0, GAME_WIDTH/2, 50, GAME_HEIGHT);
+        bgGrad.addColorStop(0, '#3d2b5a');
+        bgGrad.addColorStop(0.5, '#1a1025');
+        bgGrad.addColorStop(1, '#0d0812');
+        ctx.fillStyle = bgGrad;
+        ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+        
+        // ステージ（上部）
+        const stageGrad = ctx.createLinearGradient(0, 0, 0, 100);
+        stageGrad.addColorStop(0, '#4a3a6a');
+        stageGrad.addColorStop(1, '#2a1a3a');
+        ctx.fillStyle = stageGrad;
+        ctx.fillRect(0, 0, GAME_WIDTH, 100);
+        
+        // ステージエリア
+        ctx.fillStyle = 'rgba(60, 40, 80, 0.5)';
+        ctx.fillRect(0, 100, GAME_WIDTH, 77);
+        
+        // ステージライト（動的）
+        const time = Date.now() * 0.001;
+        for (let i = 0; i < 5; i++) {
+            const lx = 40 + i * 80;
+            const hue = (i * 60 + time * 30) % 360;
+            const gradient = ctx.createRadialGradient(lx, 10, 0, lx, 80, 100);
+            gradient.addColorStop(0, `hsla(${hue}, 80%, 60%, 0.4)`);
+            gradient.addColorStop(1, 'transparent');
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.moveTo(lx, 10);
+            ctx.lineTo(lx - 35, 140);
+            ctx.lineTo(lx + 35, 140);
+            ctx.closePath();
+            ctx.fill();
+        }
+        
+        // 絵文字で装飾
+        ctx.font = '28px serif';
+        ctx.textAlign = 'center';
+        
+        // スポットライト
+        ctx.font = '22px serif';
+        ctx.fillText('💡', 40, 25);
+        ctx.fillText('💡', 120, 25);
+        ctx.fillText('💡', 200, 25);
+        ctx.fillText('💡', 280, 25);
+        ctx.fillText('💡', 360, 25);
+        
+        // マイク（ステージ中央）
+        ctx.font = '30px serif';
+        ctx.fillText('🎤', 200, 90);
+        
+        // スピーカー
+        ctx.font = '24px serif';
+        ctx.fillText('🔊', 30, 130);
+        ctx.fillText('🔊', 370, 130);
+        
+        // 床のライン
+        ctx.strokeStyle = 'rgba(100, 80, 150, 0.2)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 8; i++) {
+            const y = 177 + i * 25;
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(GAME_WIDTH, y);
+            ctx.stroke();
+        }
+    }
+}
+
+// 楽屋の家具描画（絵文字）
+function drawRoomAFurniture() {
+    ctx.font = '32px serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
     
-    const chairW = chairSprite.naturalWidth / 2;
-    const chairH = chairSprite.naturalHeight;
-    const drawSize = 48;
-    
-    CHAIRS.forEach(chair => {
-        const sx = chair.dir === 'left' ? 0 : chairW;
-        ctx.drawImage(
-            chairSprite,
-            sx, 0, chairW, chairH,
-            chair.x - drawSize / 2, chair.y - drawSize / 2, drawSize, drawSize
-        );
-    });
+    for (const furniture of ROOM_A_FURNITURE) {
+        ctx.fillText(furniture.emoji, furniture.x, furniture.y);
+    }
 }
 
 function drawChar(p, isMe) {
@@ -855,13 +1471,35 @@ function drawChar(p, isMe) {
     const isMoving = p.isMoving || false;
     const isSitting = p.isSitting || false;
 
-    const drawSize = 56;
-    const drawY = y + z - drawSize / 2;
+    // キャラクターの影を描画
+    const shadowWidth = 30;
+    const shadowHeight = 10;
+    const shadowY = y + 20; // 足元
+    ctx.save();
+    ctx.globalAlpha = 0.25;
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.ellipse(x, shadowY, shadowWidth / 2, shadowHeight / 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
 
     // スプライトシートを使用
     if (sprite && sprite.complete && sprite.naturalWidth > 0) {
         const frameW = sprite.naturalWidth / SPRITE_COLS;
         const frameH = sprite.naturalHeight / SPRITE_ROWS;
+        
+        // アスペクト比を保持した描画サイズ
+        const maxSize = 56;
+        let drawW, drawH;
+        if (frameW > frameH) {
+            drawW = maxSize;
+            drawH = (frameH / frameW) * maxSize;
+        } else {
+            drawH = maxSize;
+            drawW = (frameW / frameH) * maxSize;
+        }
+        
+        const drawY = y + z - drawH / 2;
         
         // 行を決定: 0=front(down), 1=back(up), 2=side(left/right)
         let row = 0;
@@ -870,71 +1508,126 @@ function drawChar(p, isMe) {
         else row = 0; // down
         
         // フレームを決定
-        let frame = isMoving ? animFrame : 0;
-        if (isSitting) frame = 0; // 座っているときは静止
+        let frame = 0;
+        if (isSitting) {
+            frame = 3; // 4枚目（index 3）= 座りポーズ
+        } else if (isMoving) {
+            frame = animFrame; // 歩行パターン: 0,1,2,1,0,1,2,1...
+        } else {
+            frame = 0; // 静止
+        }
         
         const sx = frame * frameW;
         const sy = row * frameH;
         
         ctx.save();
         
-        // 左右反転（右向きの場合）
-        if (direction === 'right') {
+        // 左右反転（左向きの場合に反転）
+        if (direction === 'left') {
             ctx.translate(x, 0);
             ctx.scale(-1, 1);
             ctx.drawImage(
                 sprite,
                 sx, sy, frameW, frameH,
-                -drawSize / 2, drawY, drawSize, drawSize
+                -drawW / 2, drawY, drawW, drawH
             );
         } else {
             ctx.drawImage(
                 sprite,
                 sx, sy, frameW, frameH,
-                x - drawSize / 2, drawY, drawSize, drawSize
+                x - drawW / 2, drawY, drawW, drawH
             );
         }
         
         ctx.restore();
+        
+        // 名前表示
+        ctx.fillStyle = "#000";
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 3;
+        ctx.font = "11px 'Yusei Magic', sans-serif";
+        ctx.textAlign = "center";
+        const nameY = y + z + drawH / 2 + 12;
+        ctx.strokeText(p.name || "", x, nameY);
+        ctx.fillText(p.name || "", x, nameY);
+
+        // 吹き出し（改行対応: 10文字ごと、最大3行）
+        if (p.msg) {
+            drawBubble(x, y + z - drawH / 2, p.msg);
+        }
     } else if (fallback && fallback.complete) {
         // フォールバック: 静的画像を使用
+        const drawSize = 56;
+        const drawY = y + z - drawSize / 2;
         ctx.drawImage(fallback, x - drawSize / 2, drawY, drawSize, drawSize);
-    }
-
-    // 名前表示
-    ctx.fillStyle = "#000";
-    ctx.strokeStyle = "#fff";
-    ctx.lineWidth = 3;
-    ctx.font = "11px 'Yusei Magic', sans-serif";
-    ctx.textAlign = "center";
-    const nameY = y + z + drawSize / 2 + 12;
-    ctx.strokeText(p.name || "", x, nameY);
-    ctx.fillText(p.name || "", x, nameY);
-
-    // 吹き出し
-    if (p.msg) {
-        const displayMsg = p.msg.substring(0, 20);
-        ctx.font = "10px 'Yusei Magic', sans-serif";
-        const metrics = ctx.measureText(displayMsg);
-        const bubbleW = Math.min(metrics.width + 16, 140);
-        const bubbleH = 24;
-        const bubbleX = x - bubbleW / 2;
-        const bubbleY = y + z - drawSize / 2 - bubbleH - 8;
-
-        ctx.fillStyle = "rgba(255,255,255,0.95)";
-        ctx.beginPath();
-        ctx.roundRect(bubbleX, bubbleY, bubbleW, bubbleH, 10);
-        ctx.fill();
         
-        ctx.beginPath();
-        ctx.moveTo(x - 5, bubbleY + bubbleH);
-        ctx.lineTo(x + 5, bubbleY + bubbleH);
-        ctx.lineTo(x, bubbleY + bubbleH + 6);
-        ctx.closePath();
-        ctx.fill();
+        ctx.fillStyle = "#000";
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 3;
+        ctx.font = "11px 'Yusei Magic', sans-serif";
+        ctx.textAlign = "center";
+        const nameY = y + z + drawSize / 2 + 12;
+        ctx.strokeText(p.name || "", x, nameY);
+        ctx.fillText(p.name || "", x, nameY);
+        
+        if (p.msg) {
+            drawBubble(x, y + z - drawSize / 2, p.msg);
+        }
+    }
+}
 
-        ctx.fillStyle = "#333";
-        ctx.fillText(displayMsg, x, bubbleY + 16);
+// 吹き出し描画（改行対応）
+function drawBubble(x, charTop, msg) {
+    // 全角30文字以内、10文字で改行、最大3行
+    const maxChars = 30;
+    const charsPerLine = 10;
+    const maxLines = 3;
+    
+    let text = msg.substring(0, maxChars);
+    const lines = [];
+    
+    for (let i = 0; i < text.length && lines.length < maxLines; i += charsPerLine) {
+        lines.push(text.substring(i, i + charsPerLine));
+    }
+    
+    const fontSize = 10;
+    const lineHeight = fontSize + 4;
+    const padding = 8;
+    
+    ctx.font = `${fontSize}px 'Yusei Magic', sans-serif`;
+    
+    // 最も長い行の幅を計算
+    let maxWidth = 0;
+    for (const line of lines) {
+        const w = ctx.measureText(line).width;
+        if (w > maxWidth) maxWidth = w;
+    }
+    
+    const bubbleW = Math.min(maxWidth + padding * 2, 120);
+    const bubbleH = lines.length * lineHeight + padding * 2 - 4;
+    const bubbleX = x - bubbleW / 2;
+    const bubbleY = charTop - bubbleH - 10;
+
+    // 吹き出し背景
+    ctx.fillStyle = "rgba(255,255,255,0.95)";
+    ctx.beginPath();
+    ctx.roundRect(bubbleX, bubbleY, bubbleW, bubbleH, 10);
+    ctx.fill();
+    
+    // 吹き出しの尻尾
+    ctx.beginPath();
+    ctx.moveTo(x - 5, bubbleY + bubbleH);
+    ctx.lineTo(x + 5, bubbleY + bubbleH);
+    ctx.lineTo(x, bubbleY + bubbleH + 6);
+    ctx.closePath();
+    ctx.fill();
+
+    // テキスト描画
+    ctx.fillStyle = "#333";
+    ctx.textAlign = "center";
+    for (let i = 0; i < lines.length; i++) {
+        const textY = bubbleY + padding + (i + 1) * lineHeight - 4;
+        ctx.fillText(lines[i], x, textY);
     }
 }
 
@@ -960,24 +1653,7 @@ canvas.addEventListener('click', (e) => {
     const clickX = e.clientX - rect.left;
     const clickY = e.clientY - rect.top;
     
-    // 椅子クリックで座る
-    if (currentRoom === 'A' && !myData.isSitting) {
-        for (const chair of CHAIRS) {
-            const dist = Math.sqrt(Math.pow(clickX - chair.x, 2) + Math.pow(clickY - chair.y, 2));
-            if (dist < 30) {
-                myData.isSitting = true;
-                myData.sittingChair = chair;
-                myData.x = chair.x;
-                myData.y = chair.y;
-                myData.direction = chair.dir === 'left' ? 'left' : 'right';
-                targetX = null;
-                targetY = null;
-                return;
-            }
-        }
-    }
-    
-    // 通常移動
+    // 通常移動（椅子に向かってクリックすれば当たり判定で座る）
     if (!myData.isSitting) {
         targetX = clickX;
         targetY = Math.max(MIN_Y, Math.min(MAX_Y, clickY));
@@ -1054,9 +1730,27 @@ async function sendChat() {
         input.value = "";
         return;
     }
+    
+    // デジョン: ライブ会場から楽屋に戻る（3秒エフェクト付き）
+    if (text === '/デジョン' && currentRoom === 'B') {
+        if (isDejonActive) {
+            addLog("System", "デジョン詠唱中...");
+            input.value = "";
+            return;
+        }
+        startDejonEffect();
+        input.value = "";
+        return;
+    }
+    
+    // かわいいエフェクト
+    if (text === 'かわいい' || text === 'カワイイ' || text === 'kawaii') {
+        spawnParticles('kawaii');
+        broadcastToAll("effect", { effectType: "kawaii" });
+    }
 
-    if (text.length > 100) {
-        addLog("System", "100文字まで");
+    if (text.length > 30) {
+        addLog("System", "30文字まで");
         return;
     }
 
@@ -1206,3 +1900,6 @@ window.closeNameConfirm = closeNameConfirm;
 window.confirmNameAndJoin = confirmNameAndJoin;
 window.closeErrorModal = closeErrorModal;
 window.showError = showError;
+window.openLiveConfirmModal = openLiveConfirmModal;
+window.closeLiveConfirmModal = closeLiveConfirmModal;
+window.confirmGoToLive = confirmGoToLive;

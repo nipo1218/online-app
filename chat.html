@@ -48,6 +48,18 @@
         </div>
     </div>
 
+    <div id="live-confirm-modal" class="modal-overlay">
+        <div class="modal-box">
+            <h3>確認</h3>
+            <p>ライブ会場に移動しますか？</p>
+            <p class="note">※楽屋には戻れません</p>
+            <div class="modal-btn-row">
+                <button class="modal-btn btn-primary" onclick="confirmGoToLive()">はい</button>
+                <button class="modal-btn btn-secondary" onclick="closeLiveConfirmModal()">いいえ</button>
+            </div>
+        </div>
+    </div>
+
     <div id="error-modal" class="modal-overlay">
         <div class="modal-box">
             <h3>おしらせ</h3>
@@ -87,7 +99,7 @@
         </div>
         <div class="bottom-chat-row">
             <div class="chat-ui-btn" onclick="toggleLog()">📋</div>
-            <input type="text" id="chat-input" placeholder="チャット..." maxlength="50">
+            <input type="text" id="chat-input" placeholder="チャット..." maxlength="30">
             <div class="chat-ui-btn" onclick="toggleQuickChat()" style="background:#fff0f5; color:var(--deep-rose);">💬</div>
             <button id="send-btn" class="chat-ui-btn">▶</button>
         </div>
