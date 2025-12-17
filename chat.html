@@ -70,6 +70,17 @@
         </div>
     </div>
 
+    <div id="dejon-error-modal" class="modal-overlay">
+        <div class="modal-box dejon-error">
+            <div class="dejon-error-icon">💫</div>
+            <h3>デジョン失敗</h3>
+            <p>MPが無いのでデジョン出来ません</p>
+            <div class="modal-btn-row">
+                <button class="modal-btn btn-primary" onclick="closeDejonErrorModal()">OK</button>
+            </div>
+        </div>
+    </div>
+
     <div id="debug-info"></div>
 
     <div id="log-overlay">
@@ -83,11 +94,25 @@
     <div id="quick-chat-popup">
         <div class="quick-btn" onclick="sendQuickChat('ナイス👏')">ナイス👏</div>
         <div class="quick-btn" onclick="sendQuickChat('おめでとう🎉')">おめでとう🎉</div>
-        <div class="quick-btn" onclick="sendQuickChat('こんにちは！')">こんにちは！</div>
-        <div class="quick-btn" onclick="sendQuickChat('またね👋')">またね👋</div>
+        <div class="quick-btn" onclick="sendQuickChat('ファイト🔥')">ファイト🔥</div>
+        <div class="quick-btn" onclick="sendQuickChat('www')">www</div>
     </div>
 
     <button id="obs-exit-btn" onclick="toggleObsMode()">OBS解除</button>
+    
+    <!-- HP/MP表示 -->
+    <div id="hp-mp-display">
+        <div class="stat-bar hp-bar">
+            <span class="stat-label">HP</span>
+            <div class="stat-fill" id="hp-fill"></div>
+            <span class="stat-value" id="hp-value">100</span>
+        </div>
+        <div class="stat-bar mp-bar">
+            <span class="stat-label">MP</span>
+            <div class="stat-fill" id="mp-fill"></div>
+            <span class="stat-value" id="mp-value">30</span>
+        </div>
+    </div>
 
     <div id="bottom-ui">
         <div class="bottom-top-row">
