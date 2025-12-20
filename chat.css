@@ -140,7 +140,7 @@ canvas {
     image-rendering: pixelated;
 }
 
-/* 静止画用プレビュー設定 
+/* 静止画用プレビュー設定
    スプライト切り抜きではなく、画像を中央に配置
 */
 .char-preview {

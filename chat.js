@@ -1997,7 +1997,8 @@ function drawChar(p) {
     ctx.restore();
 
     if (img && img.complete) {
-        const drawSize = 56;
+        const drawHeight = 56;
+        const drawWidth = drawHeight * (img.naturalWidth / img.naturalHeight);
 
         // 呼吸アニメーション（静止時）
         let yOffset = 0;
@@ -2015,18 +2016,18 @@ function drawChar(p) {
             yOffset = Math.sin(breathingOffset) * 1.2;
         }
 
-        const drawY = y + z - drawSize / 2 + yOffset;
-        const drawX = x - drawSize / 2 + xOffset;
+        const drawY = y + z - drawHeight / 2 + yOffset;
+        const drawX = x - drawWidth / 2 + xOffset;
 
         ctx.save();
 
-        // 左右反転（左向きの場合に反転）
-        if (direction === 'left') {
+        // 左右反転（右向きの場合に反転）
+        if (direction === 'right') {
             ctx.translate(x, 0);
             ctx.scale(-1, 1);
-            ctx.drawImage(img, -drawSize / 2 + xOffset, drawY, drawSize, drawSize);
+            ctx.drawImage(img, -drawWidth / 2 - xOffset, drawY, drawWidth, drawHeight);
         } else {
-            ctx.drawImage(img, drawX, drawY, drawSize, drawSize);
+            ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
         }
 
         ctx.restore();
@@ -2037,13 +2038,13 @@ function drawChar(p) {
         ctx.lineWidth = 3;
         ctx.font = "11px 'Yusei Magic', sans-serif";
         ctx.textAlign = "center";
-        const nameY = y + z + drawSize / 2 + 7 + yOffset;
+        const nameY = y + z + drawHeight / 2 + 7 + yOffset;
         ctx.strokeText(p.name || "", x, nameY);
         ctx.fillText(p.name || "", x, nameY);
 
         // 吹き出し（改行対応: 10文字ごと、最大3行）
         if (p.msg) {
-            drawBubble(x, y + z - drawSize / 2 + yOffset, p.msg);
+            drawBubble(x, y + z - drawHeight / 2 + yOffset, p.msg);
         }
     }
 }
@@ -2230,7 +2231,12 @@ async function sendChat() {
     }
     
     // デジョン: ライブ会場から楽屋に戻る（3秒エフェクト付き、MP14消費、最大2回）
-    if (text === '/dejon' && currentRoom === 'B') {
+    if (text === '/dejon' || text === '/デジョン') {
+        if (currentRoom !== 'B') {
+            addLog("System", "楽屋ではデジョンできません");
+            input.value = "";
+            return;
+        }
         if (isDejonActive) {
             addLog("System", "デジョン詠唱中...");
             input.value = "";
