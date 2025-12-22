@@ -466,9 +466,25 @@ async function fetchUsersAndConnect() {
     try {
         const res = await fetch(`${SERVER_URL}/users?room=${currentRoom}`);
         const users = await res.json();
-        
+
         for (const user of users) {
             if (user.uuid === myUuid) continue;
+
+            // 既存ユーザーの初期データをplayersに追加
+            if (!players[user.uuid]) {
+                players[user.uuid] = {
+                    uuid: user.uuid,
+                    name: user.name || "名無し",
+                    charId: user.charId || "1",
+                    x: SPAWN_X,
+                    y: SPAWN_Y,
+                    direction: "down",
+                    walking: false,
+                    sitting: false,
+                    msg: ""
+                };
+            }
+
             createPeerConnection(user.uuid, true);
         }
     } catch (e) {
@@ -1639,8 +1655,8 @@ function update() {
     updateDejonEffect();
     updateRoomTransition();
 
-    // 呼吸アニメーション更新
-    breathingOffset += 0.05;
+    // 呼吸アニメーション更新（3秒で1周期）
+    breathingOffset += 0.02;
 
     if (debugMode) {
         const connectedCount = Object.keys(dataChannels).length + 1;
@@ -2441,13 +2457,18 @@ async function performExit() {
     Object.keys(peers).forEach(closePeerConnection);
     if (eventSource) eventSource.close();
 
-    navigator.sendBeacon(`${SERVER_URL}/roomAction`, JSON.stringify({ 
-        uuid: myUuid, 
+    navigator.sendBeacon(`${SERVER_URL}/roomAction`, JSON.stringify({
+        uuid: myUuid,
         action: "leave",
         isRefresh: false
     }));
 
-    showError("退室しました。10分間再入室できません。");
+    // ログアウト時にlocalStorageをクリアして再ログイン可能にする
+    localStorage.removeItem("game_name");
+    localStorage.removeItem("game_charId");
+    localStorage.removeItem("game_uuid");
+
+    showError("退室しました。");
     setTimeout(() => location.reload(), 2000);
 }
 
