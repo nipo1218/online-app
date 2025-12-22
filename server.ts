@@ -8,8 +8,8 @@ const kv = await Deno.openKv();
 const BC_CHANNEL = "nipo_signaling";
 
 // 設定定数
-const TIMEOUT_MS = 10 * 60 * 1000; // 10分 (放置判定)
-const PENALTY_MS = 10 * 60 * 1000; // 10分 (再入室禁止)
+const TIMEOUT_MS = 60 * 60 * 1000; // 1時間 (放置判定)
+const SPECIAL_USER_NAME = "にぽちゃん"; // タイムアウトしない特別なユーザー名
 
 interface UserState {
   uuid: string;
@@ -36,16 +36,17 @@ setInterval(async () => {
     const now = Date.now();
     const iter = kv.list<UserState>({ prefix: ["users"] });
     const channel = new BroadcastChannel(BC_CHANNEL);
-    
+
     for await (const entry of iter) {
       const user = entry.value;
-      if (now - user.lastActive > TIMEOUT_MS) {
+      // 「にぽちゃん」という名前のユーザーはタイムアウトしない
+      if (user.name !== SPECIAL_USER_NAME && now - user.lastActive > TIMEOUT_MS) {
         await kv.delete(["users", user.uuid]);
-        
-        channel.postMessage({ 
-          type: "userTimeout", 
-          uuid: user.uuid, 
-          name: user.name 
+
+        channel.postMessage({
+          type: "userTimeout",
+          uuid: user.uuid,
+          name: user.name
         });
       }
     }
@@ -174,14 +175,7 @@ async function handleApi(req: Request, url: URL) {
         const existing = await kv.get<UserState>(["users", uuid]);
         if (existing.value) {
           await kv.delete(["users", uuid]);
-          
-          // リフレッシュ(F5)の場合もペナルティを与える
-          if (isRefresh) {
-            await kv.set(["penalty", uuid], now + PENALTY_MS);
-          } else {
-            await kv.set(["penalty", uuid], now + PENALTY_MS);
-          }
-          
+
           const channel = new BroadcastChannel(BC_CHANNEL);
           channel.postMessage({ type: "userLeft", uuid, name: existing.value.name });
           channel.close();
@@ -190,15 +184,6 @@ async function handleApi(req: Request, url: URL) {
       }
 
       if (action === "join") {
-        // ペナルティチェック
-        const penalty = await kv.get<number>(["penalty", uuid]);
-        if (penalty.value && penalty.value > now) {
-          const remainMin = Math.ceil((penalty.value - now) / 60000);
-          return new Response(JSON.stringify({ 
-            error: `あと${remainMin}分待ってから入室してください` 
-          }), { status: 403, headers: corsHeaders });
-        }
-
         // 既存セッションの復帰（同じUUID）
         const existing = await kv.get<UserState>(["users", uuid]);
         if (existing.value) {
@@ -213,7 +198,7 @@ async function handleApi(req: Request, url: URL) {
           uuid, name, charId: charId || "1", room: targetRoom || "A", lastActive: now, joinedAt: now
         };
         await kv.set(["users", uuid], userState);
-        
+
         const channel = new BroadcastChannel(BC_CHANNEL);
         channel.postMessage({ type: "userJoined", user: userState });
         channel.close();
