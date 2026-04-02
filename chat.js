@@ -86,7 +86,7 @@ let roomTransition = {
 
 // --- 状態管理 ---
 let eventSource = null;
-let currentRoom = "A";
+let currentRoom = "B";
 let sessionStatus = "none";
 let obsMode = false;
 let debugMode = false;
@@ -225,8 +225,8 @@ async function startGame() {
         localStorage.setItem("game_charId", myData.charId);
     }
 
-    myData.x = SPAWN_X;
-    myData.y = SPAWN_Y;
+    myData.x = LIVE_SPAWN_X;
+    myData.y = LIVE_SPAWN_Y;
 
     try {
         const res = await fetch(`${SERVER_URL}/roomAction`, {
@@ -252,7 +252,7 @@ async function startGame() {
 
         if (data.status === "restored") {
             sessionStatus = "restored";
-            currentRoom = data.user.room;
+            currentRoom = "B";
             addLog("System", "セッションを復帰しました");
         } else {
             sessionStatus = "joined";
